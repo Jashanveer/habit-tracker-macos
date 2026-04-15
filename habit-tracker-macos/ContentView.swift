@@ -2,132 +2,221 @@ import FoundationModels
 import SwiftData
 import SwiftUI
 
+private enum CleanShotTheme {
+    static let accent = Color(red: 0.18, green: 0.58, blue: 0.86)
+    static let success = Color(red: 0.22, green: 0.68, blue: 0.36)
+    static let warning = Color(red: 0.96, green: 0.61, blue: 0.18)
+    static let gold = Color(red: 0.94, green: 0.74, blue: 0.24)
+    static let violet = Color(red: 0.46, green: 0.48, blue: 0.84)
+
+    static func canvas(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.055, green: 0.058, blue: 0.068)
+            : Color(red: 0.955, green: 0.965, blue: 0.975)
+    }
+
+    static func surface(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.13, green: 0.136, blue: 0.155).opacity(0.74)
+            : Color.white.opacity(0.72)
+    }
+
+    static func elevatedSurface(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.17, green: 0.178, blue: 0.20).opacity(0.78)
+            : Color.white.opacity(0.82)
+    }
+
+    static func controlFill(for colorScheme: ColorScheme, active: Bool = false) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(active ? 0.13 : 0.075)
+            : Color.black.opacity(active ? 0.075 : 0.04)
+    }
+
+    static func stroke(for colorScheme: ColorScheme, active: Bool = false) -> Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(active ? 0.20 : 0.105)
+        }
+
+        return Color.black.opacity(active ? 0.14 : 0.08)
+    }
+
+    static func shadow(for colorScheme: ColorScheme, strong: Bool = false) -> Color {
+        colorScheme == .dark
+            ? Color.black.opacity(strong ? 0.42 : 0.22)
+            : Color.black.opacity(strong ? 0.16 : 0.075)
+    }
+}
+
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Habit.createdAt) private var habits: [Habit]
 
     @State private var newHabitTitle = ""
     @State private var progressOpen = false
     @State private var calendarOpen = false
-    @State private var pointerLocation = UnitPoint(x: 0.68, y: 0.28)
+    @State private var settingsOpen = false
+    @State private var showCelebration = false
 
     private var todayKey: String { DateKey.key(for: Date()) }
     private var metrics: HabitMetrics { HabitMetrics.compute(for: habits, todayKey: todayKey) }
 
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                LiveGradientBackground(pointerLocation: pointerLocation)
-                    .zIndex(-1)
+        ZStack {
+            MinimalBackground()
+                .zIndex(-1)
 
-                CenterPanel(
-                    habits: habits,
-                    todayKey: todayKey,
-                    newHabitTitle: $newHabitTitle,
-                    metrics: metrics,
-                    onAddHabit: addHabit,
-                    onToggleHabit: toggleHabit,
-                    onDeleteHabit: deleteHabit
-                )
-                .frame(maxWidth: 860)
-                .offset(x: progressOpen ? -170 : 0)
-                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: progressOpen)
-                .zIndex(1)
+            CenterPanel(
+                habits: habits,
+                todayKey: todayKey,
+                newHabitTitle: $newHabitTitle,
+                metrics: metrics,
+                onAddHabit: addHabit,
+                onToggleHabit: toggleHabit,
+                onDeleteHabit: deleteHabit
+            )
+            .frame(maxWidth: 860)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 54)
+            .offset(x: progressOpen ? -166 : settingsOpen ? 166 : 0)
+            .animation(.spring(response: 0.46, dampingFraction: 0.84), value: progressOpen)
+            .animation(.spring(response: 0.46, dampingFraction: 0.84), value: settingsOpen)
+            .zIndex(1)
 
-                if progressOpen {
-                    Color.black.opacity(0.001)
-                        .ignoresSafeArea()
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                                progressOpen = false
-                            }
+            if progressOpen {
+                Color.black.opacity(colorScheme == .dark ? 0.08 : 0.025)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                            progressOpen = false
+                            settingsOpen = false
                         }
-
-                    HStack {
-                        Spacer()
-                        StatsSidebar(metrics: metrics)
-                            .frame(width: 330)
-                            .padding(.trailing, 22)
-                            .padding(.vertical, 22)
-                            .transition(
-                                .scale(scale: 0.01, anchor: .trailing)
-                                .combined(with: .opacity)
-                            )
                     }
-                    .zIndex(3)
-                }
 
-                if calendarOpen {
-                    VStack {
-                        Spacer()
-                        CalendarSheet(
-                            perfectDays: metrics.perfectDays,
-                            onClose: {
-                                withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                                    calendarOpen = false
-                                }
-                            }
-                        )
-                        .frame(maxWidth: 980)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 22)
+                HStack {
+                    Spacer()
+                    StatsSidebar(metrics: metrics)
+                        .frame(width: 330)
+                        .padding(.trailing, 22)
+                        .padding(.vertical, 22)
                         .transition(
-                            .scale(scale: 0.01, anchor: .bottom)
+                            .scale(scale: 0.96, anchor: .trailing)
                             .combined(with: .opacity)
                         )
-                    }
-                    .zIndex(4)
                 }
-
+                .zIndex(3)
             }
-            .onContinuousHover { phase in
-                guard case let .active(location) = phase else { return }
 
-                let width = max(proxy.size.width, 1)
-                let height = max(proxy.size.height, 1)
-                withAnimation(.smooth(duration: 0.35)) {
-                    pointerLocation = UnitPoint(
-                        x: min(max(location.x / width, 0), 1),
-                        y: min(max(location.y / height, 0), 1)
+            if settingsOpen {
+                Color.black.opacity(colorScheme == .dark ? 0.06 : 0.02)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                            settingsOpen = false
+                        }
+                    }
+
+                HStack {
+                    SettingsPanel(metrics: metrics)
+                        .frame(width: 330)
+                        .padding(.leading, 22)
+                        .padding(.vertical, 22)
+                        .transition(.scale(scale: 0.96, anchor: .leading).combined(with: .opacity))
+                    Spacer()
+                }
+                .zIndex(5)
+            }
+
+            if calendarOpen {
+                VStack {
+                    Spacer()
+                    CalendarSheet(
+                        perfectDays: metrics.perfectDays,
+                        onClose: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                                calendarOpen = false
+                            }
+                        }
+                    )
+                    .frame(maxWidth: 980)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 22)
+                    .transition(
+                        .move(edge: .bottom)
+                        .combined(with: .opacity)
                     )
                 }
+                .zIndex(4)
             }
         }
-        .overlay(alignment: .trailing) {
-            EdgePanelHandle(
-                systemImage: "chart.bar.xaxis",
-                label: "Progress",
-                edge: .trailing,
-                isActive: progressOpen,
-                dragDirection: .horizontal
-            ) {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
-                    progressOpen.toggle()
-                    if progressOpen {
+        .overlay(alignment: .leading) {
+            if !settingsOpen {
+                EdgePanelHandle(
+                    systemImage: "slider.horizontal.3",
+                    label: "Settings",
+                    edge: .leading,
+                    isActive: settingsOpen,
+                    dragDirection: .horizontal
+                ) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        settingsOpen.toggle()
+                        progressOpen = false
                         calendarOpen = false
                     }
                 }
+                .padding(.leading, 8)
+                .transition(.scale(scale: 0.94, anchor: .leading).combined(with: .opacity))
             }
-            .padding(.trailing, 8)
+        }
+        .overlay(alignment: .trailing) {
+            if !progressOpen {
+                EdgePanelHandle(
+                    systemImage: "chart.bar.xaxis",
+                    label: "Progress",
+                    edge: .trailing,
+                    isActive: progressOpen,
+                    dragDirection: .horizontal
+                ) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        progressOpen.toggle()
+                        settingsOpen = false
+                        calendarOpen = false
+                    }
+                }
+                .padding(.trailing, 8)
+                .transition(.scale(scale: 0.94, anchor: .trailing).combined(with: .opacity))
+            }
         }
         .overlay(alignment: .bottom) {
-            EdgePanelHandle(
-                systemImage: "calendar",
-                label: "Calendar",
-                edge: .bottom,
-                isActive: calendarOpen,
-                dragDirection: .vertical
-            ) {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
-                    calendarOpen.toggle()
-                    if calendarOpen {
+            if !calendarOpen {
+                EdgePanelHandle(
+                    systemImage: "calendar",
+                    label: "Calendar",
+                    edge: .bottom,
+                    isActive: calendarOpen,
+                    dragDirection: .vertical
+                ) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        calendarOpen.toggle()
+                        settingsOpen = false
                         progressOpen = false
                     }
                 }
+                .padding(.bottom, 8)
+                .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
             }
-            .padding(.bottom, 8)
+        }
+        .overlay {
+            if showCelebration {
+                ConfettiOverlay()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .animation(.smooth(duration: 0.2), value: colorScheme)
     }
 
     private func addHabit() {
@@ -142,6 +231,7 @@ struct ContentView: View {
 
     private func toggleHabit(_ habit: Habit) {
         var keys = habit.completedDayKeys
+        let wasUnchecked = !keys.contains(todayKey)
         if let index = keys.firstIndex(of: todayKey) {
             keys.remove(at: index)
         } else {
@@ -150,6 +240,29 @@ struct ContentView: View {
 
         withAnimation(.snappy(duration: 0.2)) {
             habit.completedDayKeys = keys.sorted()
+        }
+
+        if wasUnchecked && habits.count > 1 {
+            let doneAfter = habits.filter { h in
+                if h.id == habit.id {
+                    return keys.contains(todayKey)
+                }
+                return h.completedDayKeys.contains(todayKey)
+            }.count
+            if doneAfter == habits.count {
+                triggerCelebration()
+            }
+        }
+    }
+
+    private func triggerCelebration() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            showCelebration = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(.easeOut(duration: 0.5)) {
+                showCelebration = false
+            }
         }
     }
 
@@ -173,7 +286,6 @@ private struct CenterPanel: View {
     @State private var aiGreeting: String?
     @State private var hasRequestedGreeting = false
 
-    private var percent: Int { Int((metrics.progressToday * 100).rounded()) }
     private var isEmpty: Bool { habits.isEmpty }
 
     var body: some View {
@@ -184,8 +296,6 @@ private struct CenterPanel: View {
 
             TodayHeader(
                 greeting: displayGreeting,
-                metrics: metrics,
-                percent: percent,
                 isCompact: !isEmpty
             )
 
@@ -193,7 +303,7 @@ private struct CenterPanel: View {
                 .frame(maxWidth: 520)
 
             if isEmpty {
-                Text("✨ Add your first habit to get started")
+                Text("Add your first habit to get started")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
                     .padding(.top, 4)
@@ -216,7 +326,10 @@ private struct CenterPanel: View {
         .padding(.top, isEmpty ? 0 : 16)
         .padding(.bottom, 8)
         .frame(maxWidth: 860, maxHeight: .infinity)
+        .padding(.horizontal, 34)
+        .padding(.vertical, 28)
         .animation(.spring(response: 0.5, dampingFraction: 0.82), value: isEmpty)
+        .animation(.smooth(duration: 0.2), value: metrics.doneToday)
         .onAppear {
             guard !hasRequestedGreeting else { return }
             hasRequestedGreeting = true
@@ -276,6 +389,110 @@ private struct CenterPanel: View {
     }
 }
 
+private struct SettingsPanel: View {
+    let metrics: HabitMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(CleanShotTheme.accent)
+                    .frame(width: 30, height: 30)
+                    .cleanShotSurface(shape: RoundedRectangle(cornerRadius: 8, style: .continuous), level: .control)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Preferences")
+                        .font(.headline)
+                    Text("Quiet defaults for daily tracking")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            VStack(spacing: 8) {
+                SettingsRow(systemImage: "moon.stars", title: "Appearance", value: "Follows macOS")
+                SettingsRow(systemImage: "internaldrive", title: "Storage", value: "Local SwiftData")
+                SettingsRow(systemImage: "sparkles", title: "Celebration", value: "Perfect day")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Today")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    SettingsMetric(value: "\(metrics.doneToday)", label: "Done")
+                    SettingsMetric(value: "\(metrics.totalHabits)", label: "Habits")
+                    SettingsMetric(value: "\(metrics.currentPerfectStreak)d", label: "Streak")
+                }
+            }
+        }
+        .padding(16)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .elevated,
+            shadowRadius: 18
+        )
+    }
+}
+
+private struct SettingsRow: View {
+    let systemImage: String
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
+            Text(title)
+                .font(.subheadline.weight(.medium))
+
+            Spacer()
+
+            Text(value)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            level: .control
+        )
+    }
+}
+
+private struct SettingsMetric: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .contentTransition(.numericText())
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            level: .control
+        )
+    }
+}
+
 private struct EdgePanelHandle: View {
     enum DragDirection {
         case horizontal
@@ -289,21 +506,47 @@ private struct EdgePanelHandle: View {
     let dragDirection: DragDirection
     let action: () -> Void
 
+    @State private var isHovered = false
+
+    private var dateLabel: String {
+        Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
+
+    private var displayLabel: String {
+        if case .bottom = edge, !isHovered {
+            return dateLabel
+        }
+
+        return label
+    }
+
     var body: some View {
         Button(action: action) {
             Group {
                 switch edge {
+                case .leading:
+                    Label(label, systemImage: systemImage)
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 44, height: 74)
                 case .trailing:
                     Label(label, systemImage: systemImage)
                         .labelStyle(.iconOnly)
                         .font(.system(size: 17, weight: .semibold))
                         .frame(width: 44, height: 74)
                 case .bottom:
-                    Label(label, systemImage: systemImage)
+                    Label(displayLabel, systemImage: systemImage)
                         .labelStyle(.titleAndIcon)
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 16)
-                        .frame(height: 34)
+                        .frame(width: 188, height: 34)
+                        .overlay {
+                            Label(dateLabel, systemImage: systemImage)
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 16)
+                                .hidden()
+                        }
                 default:
                     EmptyView()
                 }
@@ -311,6 +554,8 @@ private struct EdgePanelHandle: View {
         }
         .buttonStyle(EdgeHandleButtonStyle(isActive: isActive))
         .accessibilityLabel(label)
+        .animation(.smooth(duration: 0.14), value: isHovered)
+        .onHover { isHovered = $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
@@ -336,7 +581,7 @@ private struct CalendarSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("🔥 Perfect days")
+                Text("Perfect Days")
                     .font(.headline)
                 Spacer()
                 Button {
@@ -346,7 +591,7 @@ private struct CalendarSheet: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
                         .frame(width: 24, height: 24)
-                        .background(Circle().fill(.ultraThinMaterial))
+                        .cleanShotSurface(shape: Circle(), level: .control)
                 }
                 .buttonStyle(.plain)
             }
@@ -354,11 +599,10 @@ private struct CalendarSheet: View {
             YearPerfectCalendar(perfectDays: perfectDays)
         }
         .padding(18)
-        .liquidGlassBackground(
-            shape: RoundedRectangle(cornerRadius: 30, style: .continuous),
-            fillOpacity: 0.035,
-            strokeOpacity: 0.26,
-            shadowRadius: 24
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 16, style: .continuous),
+            level: .elevated,
+            shadowRadius: 12
         )
         .simultaneousGesture(
             DragGesture(minimumDistance: 16)
@@ -375,34 +619,16 @@ private struct CalendarSheet: View {
 
 private struct TodayHeader: View {
     let greeting: String
-    let metrics: HabitMetrics
-    let percent: Int
     var isCompact: Bool = false
 
     var body: some View {
         VStack(alignment: .center, spacing: isCompact ? 4 : 8) {
             Text(greeting)
-                .font(.system(size: isCompact ? 22 : 30, weight: .semibold))
+                .font(.system(size: isCompact ? 22 : 30, weight: .semibold, design: .rounded))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .contentTransition(.numericText())
                 .frame(maxWidth: 480)
-
-            Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-
-            if metrics.totalHabits > 0 {
-                HStack(spacing: 6) {
-                    ProgressView(value: metrics.progressToday)
-                        .tint(.green)
-                        .frame(width: 80)
-                    Text("\(percent)%")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 2)
-            }
         }
         .padding(.vertical, isCompact ? 6 : 12)
     }
@@ -412,52 +638,40 @@ private struct AddHabitBar: View {
     @Binding var newHabitTitle: String
     let onAddHabit: () -> Void
 
-    @State private var isFocused = false
+    @State private var isHovered = false
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(.tertiary)
-                .padding(.leading, 12)
-
+        HStack(spacing: 8) {
             TextField("Add a new habit...", text: $newHabitTitle)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
-                .padding(.leading, 8)
-                .padding(.vertical, 10)
+                .padding(.leading, 16)
                 .focused($fieldFocused)
                 .onSubmit(onAddHabit)
 
             if !newHabitTitle.isEmpty {
                 Button(action: onAddHabit) {
                     Text("Add")
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Color.accentColor, in: Capsule())
+                        .frame(width: 34, height: 34)
+                        .background(CleanShotTheme.accent, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
-                .padding(.trailing, 6)
+                .transition(.scale(scale: 0.82, anchor: .trailing).combined(with: .opacity))
             }
         }
-        .frame(height: 38)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .opacity(0.6)
+        .padding(.trailing, newHabitTitle.isEmpty ? 16 : 5)
+        .frame(height: 46)
+        .cleanShotSurface(
+            shape: Capsule(),
+            level: .control,
+            isActive: fieldFocused || isHovered
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(fieldFocused ? 0.3 : 0.12), lineWidth: 1)
-                .allowsHitTesting(false)
-        )
-        .shadow(color: .black.opacity(0.06), radius: fieldFocused ? 12 : 6, y: 3)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: newHabitTitle.isEmpty)
-        .onChange(of: fieldFocused) { isFocused = fieldFocused }
+        .animation(.easeOut(duration: 0.15), value: newHabitTitle.isEmpty)
+        .animation(.smooth(duration: 0.16), value: fieldFocused)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -474,7 +688,7 @@ private struct HabitListSection: View {
     var body: some View {
         VStack(alignment: .center, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text("📋 Today's habits")
+                Text("Today's habits")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text("\(doneCount)/\(habits.count) done")
@@ -499,205 +713,211 @@ private struct HabitListSection: View {
     }
 }
 
-private struct LiveGradientBackground: View {
+private struct MinimalBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
-    let pointerLocation: UnitPoint
-
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
-            GeometryReader { proxy in
-                let time = timeline.date.timeIntervalSinceReferenceDate
-                let size = proxy.size
-                let pointer = CGPoint(
-                    x: pointerLocation.x * size.width,
-                    y: pointerLocation.y * size.height
-                )
-
-                ZStack {
-                    LinearGradient(
-                        colors: colorScheme == .dark
-                            ? [baseColor, Color(red: 0.06, green: 0.07, blue: 0.09)]
-                            : [Color(red: 0.98, green: 0.99, blue: 1.00), Color(red: 0.93, green: 0.97, blue: 1.00)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-
-                    gradientOrb(
-                        color: Color(red: 0.20, green: 0.52, blue: 1.00),
-                        size: size.width * 0.56,
-                        position: animatedPoint(
-                            base: CGPoint(x: pointer.x, y: pointer.y),
-                            radius: 54,
-                            speed: 0.55,
-                            phase: time
-                        )
-                    )
-
-                    gradientOrb(
-                        color: Color(red: 0.30, green: 0.80, blue: 0.68),
-                        size: size.width * 0.50,
-                        position: animatedPoint(
-                            base: CGPoint(x: size.width * 0.30, y: size.height * 0.22),
-                            radius: 70,
-                            speed: 0.35,
-                            phase: time + 1.2
-                        )
-                    )
-
-                    gradientOrb(
-                        color: Color(red: 1.00, green: 0.42, blue: 0.38),
-                        size: size.width * 0.48,
-                        position: animatedPoint(
-                            base: CGPoint(x: size.width * 0.72, y: size.height * 0.78),
-                            radius: 82,
-                            speed: 0.30,
-                            phase: time + 2.4
-                        )
-                    )
-
-                    gradientOrb(
-                        color: Color(red: 0.98, green: 0.74, blue: 0.24),
-                        size: size.width * 0.38,
-                        position: animatedPoint(
-                            base: CGPoint(x: size.width * 0.18, y: size.height * 0.84),
-                            radius: 46,
-                            speed: 0.48,
-                            phase: time + 0.6
-                        )
-                    )
-
-                    LinearGradient(
-                        colors: [
-                            baseColor.opacity(colorScheme == .dark ? 0.32 : 0.04),
-                            baseColor.opacity(colorScheme == .dark ? 0.62 : 0.18)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-                .compositingGroup()
-            }
-        }
-        .ignoresSafeArea()
-    }
-
-    private var baseColor: Color {
-        Color(nsColor: .windowBackgroundColor)
-    }
-
-    private func animatedPoint(base: CGPoint, radius: CGFloat, speed: Double, phase: TimeInterval) -> CGPoint {
-        CGPoint(
-            x: base.x + cos(phase * speed) * radius,
-            y: base.y + sin(phase * speed * 1.18) * radius
-        )
-    }
-
-    private func gradientOrb(color: Color, size: CGFloat, position: CGPoint) -> some View {
-        Circle()
-            .fill(
-                RadialGradient(
-                    colors: [
-                        color.opacity(colorScheme == .dark ? 0.45 : 0.42),
-                        color.opacity(colorScheme == .dark ? 0.18 : 0.24),
-                        .clear
-                    ],
-                    center: .center,
-                    startRadius: 0,
-                    endRadius: max(size / 2, 1)
-                )
-            )
-            .frame(width: size, height: size)
-            .position(position)
-            .blur(radius: 38)
-            .blendMode(colorScheme == .dark ? .screen : .normal)
-            .allowsHitTesting(false)
+        CleanShotTheme.canvas(for: colorScheme)
+            .ignoresSafeArea()
     }
 }
 
 private struct StatsSidebar: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let metrics: HabitMetrics
 
     private var level: Int { metrics.totalChecks / 100 + 1 }
     private var xp: Int { metrics.totalChecks % 100 }
+    private var percent: Int { Int((metrics.progressToday * 100).rounded()) }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("📊 Progress")
-                        .font(.title3.weight(.semibold))
-                    Text("Your stats at a glance")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.top, 6)
+            VStack(spacing: 16) {
+                // MARK: - Hero Streak Ring
+                ZStack {
+                    Circle()
+                        .stroke(CleanShotTheme.controlFill(for: colorScheme), lineWidth: 10)
+                        .frame(width: 120, height: 120)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Today")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Text("\(Int((metrics.progressToday * 100).rounded()))%")
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                    }
+                    Circle()
+                        .trim(from: 0, to: metrics.progressToday)
+                        .stroke(
+                            CleanShotTheme.success,
+                            style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                        )
+                        .frame(width: 120, height: 120)
+                        .rotationEffect(.degrees(-90))
+                        .animation(.spring(response: 0.8, dampingFraction: 0.7), value: metrics.progressToday)
 
-                    ProgressView(value: metrics.progressToday)
-                        .tint(.green)
-
-                    HStack {
-                        Text("\(metrics.doneToday) of \(metrics.totalHabits) done")
-                        Spacer()
-                        Text("\(metrics.currentPerfectStreak)d perfect streak")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                .padding(12)
-                .minimalGlassPanel()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionHeader(systemImage: "chart.bar", title: "📊 Summary")
-
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        StatTile(label: "Total habits", value: "\(metrics.totalHabits)", systemImage: "pin.fill")
-                        StatTile(label: "Done today", value: "\(metrics.doneToday)", systemImage: "checkmark.circle.fill")
-                        StatTile(label: "Perfect streak", value: "\(metrics.currentPerfectStreak)d", systemImage: "flame.fill")
-                        StatTile(label: "Best perfect", value: "\(metrics.bestPerfectStreak)d", systemImage: "trophy.fill")
+                    VStack(spacing: 2) {
+                        Text("\(percent)%")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .contentTransition(.numericText())
+                        Text("today")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
                     }
                 }
+                .padding(.top, 14)
+                .padding(.bottom, 4)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(systemImage: "star", title: "⭐ Level")
-                    HStack(spacing: 12) {
-                        Text("Lv \(level)")
-                            .font(.headline)
-                            .frame(width: 54, height: 54)
-                            .liquidGlassControl(shape: Circle())
+                // MARK: - Streak Highlight
+                HStack(spacing: 14) {
+                    StreakPill(
+                        icon: "flame.fill",
+                        value: "\(metrics.currentPerfectStreak)",
+                        unit: "day streak",
+                        color: CleanShotTheme.warning
+                    )
+                    StreakPill(
+                        icon: "trophy.fill",
+                        value: "\(metrics.bestPerfectStreak)",
+                        unit: "best",
+                        color: CleanShotTheme.gold
+                    )
+                }
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("XP: \(xp) / 100")
+                // MARK: - Stats Grid
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    StatCard(icon: "checklist", label: "Habits", value: "\(metrics.totalHabits)", tint: CleanShotTheme.accent)
+                    StatCard(icon: "checkmark.circle.fill", label: "Done", value: "\(metrics.doneToday)", tint: CleanShotTheme.success)
+                    StatCard(icon: "star.fill", label: "Perfect days", value: "\(metrics.perfectDaysCount)", tint: CleanShotTheme.gold)
+                    StatCard(icon: "bolt.fill", label: "Total checks", value: "\(metrics.totalChecks)", tint: Color(red: 0.42, green: 0.48, blue: 0.86))
+                }
+
+                // MARK: - Level & XP
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(CleanShotTheme.controlFill(for: colorScheme, active: true))
+                            Text("\(level)")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(CleanShotTheme.accent)
+                        }
+                        .frame(width: 44, height: 44)
+                        .cleanShotSurface(shape: Circle(), level: .control)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Level \(level)")
                                 .font(.subheadline.weight(.semibold))
-                            ProgressView(value: Double(xp), total: 100)
-                                .tint(.blue)
-                            Text("Next level in \(100 - xp) XP")
-                                .font(.caption)
+                            Text("\(xp)/100 XP to next level")
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
+                        Spacer()
                     }
-                }
 
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(CleanShotTheme.controlFill(for: colorScheme))
+                                .overlay(
+                                    Capsule()
+                                        .stroke(CleanShotTheme.stroke(for: colorScheme), lineWidth: 0.5)
+                                )
+
+                            Capsule()
+                                .fill(CleanShotTheme.accent)
+                                .frame(width: max(geo.size.width * CGFloat(xp) / 100.0, 6))
+                                .animation(.spring(response: 0.6, dampingFraction: 0.75), value: xp)
+                        }
+                    }
+                    .frame(height: 8)
+                }
+                .padding(14)
+                .cleanShotSurface(
+                    shape: RoundedRectangle(cornerRadius: 20, style: .continuous),
+                    level: .control
+                )
+
+                // MARK: - Achievements
                 VStack(alignment: .leading, spacing: 10) {
-                    SectionHeader(systemImage: "trophy", title: "🏆 Achievements")
+                    Text("Achievements")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.leading, 4)
+
                     ForEach(metrics.medals) { medal in
                         AchievementRow(medal: medal)
                     }
                 }
             }
-            .padding(18)
+            .padding(16)
         }
-        .sidebarGlassStyle()
+        .scrollIndicators(.hidden)
+        .sidebarSurfaceStyle()
+    }
+}
+
+private struct StreakPill: View {
+    let icon: String
+    let value: String
+    let unit: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(color.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .contentTransition(.numericText())
+                Text(unit)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
+    }
+}
+
+private struct StatCard: View {
+    let icon: String
+    let label: String
+    let value: String
+    let tint: Color
+
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .background(tint.opacity(0.12), in: Circle())
+
+            Text(value)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .contentTransition(.numericText())
+
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 20, style: .continuous),
+            level: .control,
+            isActive: isHovered
+        )
+        .scaleEffect(isHovered ? 1.015 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: isHovered)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -742,11 +962,13 @@ private struct HabitSidebar: View {
             }
         }
         .padding(18)
-        .sidebarGlassStyle()
+        .sidebarSurfaceStyle()
     }
 }
 
 private struct HabitCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let habit: Habit
     let todayKey: String
     let onToggle: (Habit) -> Void
@@ -769,7 +991,7 @@ private struct HabitCard: View {
             } label: {
                 Image(systemName: doneToday ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(doneToday ? .green : .secondary.opacity(0.6))
+                    .foregroundStyle(doneToday ? CleanShotTheme.success : .secondary.opacity(0.6))
                     .contentTransition(.symbolEffect(.replace.downUp))
             }
             .buttonStyle(.plain)
@@ -784,16 +1006,20 @@ private struct HabitCard: View {
                 HStack(spacing: 8) {
                     if currentStreak > 0 {
                         Label("\(currentStreak)d", systemImage: "flame.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(CleanShotTheme.warning)
                     }
                     if bestStreak > 0 {
                         Label("\(bestStreak)d best", systemImage: "trophy.fill")
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(CleanShotTheme.gold)
                     }
                     HStack(spacing: 3) {
                         ForEach(recentDays) { day in
                             Circle()
-                                .fill(habit.completedDayKeys.contains(day.key) ? Color.green : Color.primary.opacity(0.1))
+                                .fill(
+                                    habit.completedDayKeys.contains(day.key)
+                                        ? CleanShotTheme.success
+                                        : CleanShotTheme.controlFill(for: colorScheme)
+                                )
                                 .frame(width: 6, height: 6)
                         }
                     }
@@ -824,24 +1050,20 @@ private struct HabitCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: 560, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .opacity(isHovered ? 0.7 : 0.45)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            level: .control,
+            isActive: isHovered
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(isHovered ? 0.2 : 0.1), lineWidth: 0.5)
-                .allowsHitTesting(false)
-        )
-        .shadow(color: .black.opacity(isHovered ? 0.08 : 0.04), radius: isHovered ? 8 : 4, y: 2)
-        .scaleEffect(isHovered ? 1.01 : 1.0)
-        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isHovered)
+        .scaleEffect(isHovered ? 1.008 : 1)
+        .animation(.smooth(duration: 0.15), value: isHovered)
         .onHover { isHovered = $0 }
     }
 }
 
 private struct YearPerfectCalendar: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let perfectDays: [String]
 
     private let columns = [GridItem(.adaptive(minimum: 122), spacing: 18)]
@@ -851,13 +1073,13 @@ private struct YearPerfectCalendar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("🗓️ \(String(year)) Perfect Days")
+                Text("\(String(year)) Perfect Days")
                     .font(.headline)
                     .lineLimit(1)
                 Spacer()
                 HStack(spacing: 12) {
-                    LegendDot(title: "Not perfect", color: Color.black.opacity(0.12))
-                    LegendDot(title: "Perfect", color: .green)
+                    LegendDot(title: "Not perfect", color: CleanShotTheme.controlFill(for: colorScheme))
+                    LegendDot(title: "Perfect", color: CleanShotTheme.success)
                 }
             }
             .padding(.bottom, 4)
@@ -873,6 +1095,8 @@ private struct YearPerfectCalendar: View {
 }
 
 private struct MonthDots: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let month: Int
     let year: Int
     let perfectSet: Set<String>
@@ -898,7 +1122,11 @@ private struct MonthDots: View {
 
                 ForEach(days) { day in
                     Circle()
-                        .fill(perfectSet.contains(day.key) ? Color.green : Color.black.opacity(0.12))
+                        .fill(
+                            perfectSet.contains(day.key)
+                                ? CleanShotTheme.success
+                                : CleanShotTheme.controlFill(for: colorScheme)
+                        )
                         .aspectRatio(1, contentMode: .fit)
                         .help(day.key)
                 }
@@ -911,65 +1139,39 @@ private struct MonthDots: View {
     }
 }
 
-private struct StatTile: View {
-    let label: String
-    let value: String
-    let systemImage: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .frame(width: 26, height: 26)
-                .minimalGlassPanel()
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.headline)
-            }
-            .lineLimit(1)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .minimalGlassPanel()
-    }
-}
-
 private struct AchievementRow: View {
     let medal: Medal
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: medal.unlocked ? "checkmark.seal.fill" : "lock.fill")
-                .foregroundStyle(medal.unlocked ? .green : .secondary)
-                .frame(width: 22)
+            ZStack {
+                Circle()
+                    .fill(medal.unlocked ? CleanShotTheme.success.opacity(0.14) : Color.secondary.opacity(0.10))
+                Image(systemName: medal.unlocked ? "checkmark.seal.fill" : "lock.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(medal.unlocked ? CleanShotTheme.success : .secondary.opacity(0.5))
+            }
+            .frame(width: 32, height: 32)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(medal.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(medal.unlocked ? .primary : .secondary)
                 Text(medal.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .minimalGlassPanel()
-    }
-}
 
-private struct SectionHeader: View {
-    let systemImage: String
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-            Text(title)
+            Spacer()
         }
-        .font(.headline)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 16, style: .continuous),
+            level: .control,
+            isActive: medal.unlocked
+        )
+        .opacity(medal.unlocked ? 1.0 : 0.65)
     }
 }
 
@@ -989,14 +1191,199 @@ private struct LegendDot: View {
     }
 }
 
+// MARK: - Confetti Celebration
+
+private struct ConfettiParticle: Identifiable {
+    let id = UUID()
+    var x: CGFloat
+    var y: CGFloat
+    let size: CGFloat
+    let color: Color
+    let rotation: Double
+    let xVelocity: CGFloat
+    let yVelocity: CGFloat
+    let shape: Int // 0 = circle, 1 = rectangle, 2 = triangle
+}
+
+private struct ConfettiOverlay: View {
+    @State private var particles: [ConfettiParticle] = []
+    @State private var elapsed: TimeInterval = 0
+    @State private var startDate = Date()
+
+    private let colors: [Color] = [
+        .red, .orange, .yellow, .green, .blue, .purple, .pink, .cyan, .mint, .indigo
+    ]
+
+    var body: some View {
+        GeometryReader { geo in
+            TimelineView(.animation(minimumInterval: 1.0 / 60)) { timeline in
+                Canvas { context, canvasSize in
+                    for particle in particles {
+                        let t = elapsed
+                        let gravity: CGFloat = 420
+                        let drag: CGFloat = 0.97
+
+                        let px = particle.x + particle.xVelocity * t * drag
+                        let py = particle.y + particle.yVelocity * t * drag + 0.5 * gravity * t * t
+                        let angle = Angle.degrees(particle.rotation + t * 180)
+
+                        guard px > -20, px < canvasSize.width + 20,
+                              py < canvasSize.height + 40 else { continue }
+
+                        context.opacity = max(1.0 - t * 0.4, 0)
+
+                        switch particle.shape {
+                        case 0:
+                            let rect = CGRect(
+                                x: px - particle.size / 2,
+                                y: py - particle.size / 2,
+                                width: particle.size,
+                                height: particle.size
+                            )
+                            context.fill(
+                                Circle().path(in: rect),
+                                with: .color(particle.color)
+                            )
+                        case 1:
+                            let transform = CGAffineTransform.identity
+                                .translatedBy(x: px, y: py)
+                                .rotated(by: angle.radians)
+                            let rect = CGRect(
+                                x: -particle.size * 0.6,
+                                y: -particle.size * 0.3,
+                                width: particle.size * 1.2,
+                                height: particle.size * 0.6
+                            )
+                            let path = Rectangle().path(in: rect).applying(transform)
+                            context.fill(path, with: .color(particle.color))
+                        default:
+                            var path = Path()
+                            let s = particle.size
+                            path.move(to: CGPoint(x: 0, y: -s / 2))
+                            path.addLine(to: CGPoint(x: s / 2, y: s / 2))
+                            path.addLine(to: CGPoint(x: -s / 2, y: s / 2))
+                            path.closeSubpath()
+                            let transform = CGAffineTransform.identity
+                                .translatedBy(x: px, y: py)
+                                .rotated(by: angle.radians)
+                            context.fill(
+                                path.applying(transform),
+                                with: .color(particle.color)
+                            )
+                        }
+                    }
+                }
+                .onChange(of: timeline.date) {
+                    elapsed = timeline.date.timeIntervalSince(startDate)
+                }
+            }
+            .onAppear {
+                startDate = Date()
+                spawnParticles(in: geo.size)
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func spawnParticles(in size: CGSize) {
+        let centerX = size.width / 2
+        let topY = size.height * 0.15
+
+        particles = (0..<80).map { _ in
+            let angle = Double.random(in: -Double.pi * 0.85 ... -Double.pi * 0.15)
+            let speed = CGFloat.random(in: 280...620)
+            return ConfettiParticle(
+                x: centerX + CGFloat.random(in: -60...60),
+                y: topY + CGFloat.random(in: -20...20),
+                size: CGFloat.random(in: 5...11),
+                color: colors.randomElement() ?? .yellow,
+                rotation: Double.random(in: 0...360),
+                xVelocity: cos(angle) * speed,
+                yVelocity: sin(angle) * speed,
+                shape: Int.random(in: 0...2)
+            )
+        }
+    }
+}
+
 private struct PanelStyle: ViewModifier {
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
         content
             .padding(16)
-            .liquidGlassBackground(shape: shape, fillOpacity: 0.06, strokeOpacity: 0.34)
-            .shadow(color: Color.black.opacity(0.13), radius: 18, x: 0, y: 8)
+            .cleanShotSurface(shape: shape, level: .base)
+    }
+}
+
+private enum CleanShotSurfaceLevel {
+    case base
+    case elevated
+    case control
+}
+
+private struct CleanShotSurfaceModifier<S: InsettableShape>: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let shape: S
+    let level: CleanShotSurfaceLevel
+    let isActive: Bool
+    let shadowRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(material, in: shape)
+            .background(fill, in: shape)
+            .overlay(
+                shape
+                    .stroke(CleanShotTheme.stroke(for: colorScheme, active: isActive), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: shadowColor, radius: appliedShadowRadius, y: appliedShadowRadius == 0 ? 0 : 6)
+    }
+
+    private var fill: Color {
+        switch level {
+        case .base:
+            CleanShotTheme.surface(for: colorScheme)
+        case .elevated:
+            CleanShotTheme.elevatedSurface(for: colorScheme)
+        case .control:
+            CleanShotTheme.controlFill(for: colorScheme, active: isActive)
+        }
+    }
+
+    private var material: Material {
+        switch level {
+        case .base:
+            return .thinMaterial
+        case .elevated:
+            return .regularMaterial
+        case .control:
+            return .ultraThinMaterial
+        }
+    }
+
+    private var appliedShadowRadius: CGFloat {
+        switch level {
+        case .base:
+            return min(shadowRadius, 12)
+        case .elevated:
+            return min(shadowRadius, 18)
+        case .control:
+            return isActive ? 4 : 0
+        }
+    }
+
+    private var shadowColor: Color {
+        switch level {
+        case .base:
+            return CleanShotTheme.shadow(for: colorScheme)
+        case .elevated:
+            return CleanShotTheme.shadow(for: colorScheme, strong: true)
+        case .control:
+            return isActive ? CleanShotTheme.shadow(for: colorScheme) : .clear
+        }
     }
 }
 
@@ -1005,100 +1392,51 @@ private extension View {
         modifier(PanelStyle())
     }
 
-    func minimalGlassPanel() -> some View {
-        liquidGlassBackground(
-            shape: RoundedRectangle(cornerRadius: 22, style: .continuous),
-            fillOpacity: 0.025,
-            strokeOpacity: 0.24,
-            shadowRadius: 10
+    func minimalPanel() -> some View {
+        cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+            level: .control
         )
     }
 
-    func sidebarGlassStyle() -> some View {
-        liquidGlassBackground(
-            shape: RoundedRectangle(cornerRadius: 28, style: .continuous),
-            fillOpacity: 0.02,
-            strokeOpacity: 0.12,
-            shadowRadius: 0
+    func sidebarSurfaceStyle() -> some View {
+        cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
+            level: .elevated,
+            shadowRadius: 12
         )
     }
 
-    func liquidGlassControl() -> some View {
-        liquidGlassControl(shape: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    func liquidGlassControl<S: InsettableShape>(shape: S) -> some View {
-        liquidGlassBackground(shape: shape, fillOpacity: 0.045, strokeOpacity: 0.32, shadowRadius: 8, interactive: true)
-    }
-
-    @ViewBuilder
-    func liquidGlassBackground<S: InsettableShape>(
+    func cleanShotSurface<S: InsettableShape>(
         shape: S,
-        fillOpacity: Double,
-        strokeOpacity: Double,
-        shadowRadius: CGFloat = 12,
-        interactive: Bool = false
+        level: CleanShotSurfaceLevel,
+        isActive: Bool = false,
+        shadowRadius: CGFloat = 10
     ) -> some View {
-        if #available(macOS 26.0, *) {
-            self
-                .background(Color.white.opacity(fillOpacity), in: shape)
-                .glassEffect(.regular.interactive(interactive), in: shape)
-                .overlay(
-                    shape
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.26),
-                                    Color.white.opacity(0.05),
-                                    Color.white.opacity(0.00)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .blendMode(.plusLighter)
-                        .allowsHitTesting(false)
-                )
-                .overlay(
-                    shape
-                        .stroke(Color.white.opacity(strokeOpacity), lineWidth: 1)
-                        .allowsHitTesting(false)
-                )
-                .shadow(color: Color.black.opacity(shadowRadius == 0 ? 0 : 0.10), radius: shadowRadius, x: 0, y: shadowRadius / 2)
-        } else {
-            self
-                .background(.ultraThinMaterial, in: shape)
-                .overlay(
-                    shape
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(fillOpacity + 0.10),
-                                    Color.white.opacity(fillOpacity),
-                                    Color.white.opacity(0.0)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .allowsHitTesting(false)
-                )
-                .overlay(
-                    shape
-                        .stroke(Color.white.opacity(strokeOpacity), lineWidth: 1)
-                        .allowsHitTesting(false)
-                )
-                .shadow(color: Color.black.opacity(shadowRadius == 0 ? 0 : 0.10), radius: shadowRadius, x: 0, y: shadowRadius / 2)
-        }
+        modifier(
+            CleanShotSurfaceModifier(
+                shape: shape,
+                level: level,
+                isActive: isActive,
+                shadowRadius: shadowRadius
+            )
+        )
     }
 }
 
 private struct PrimaryCircleButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.white)
-            .background(Color.blue, in: Circle())
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .background(CleanShotTheme.accent, in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(CleanShotTheme.stroke(for: colorScheme, active: true), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 
@@ -1106,43 +1444,44 @@ private struct PrimaryCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.white)
-            .background(Color.accentColor.opacity(configuration.isPressed ? 0.82 : 0.95), in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(Color.white.opacity(0.30), lineWidth: 1)
-            )
+            .background(CleanShotTheme.accent.opacity(configuration.isPressed ? 0.75 : 1.0), in: Capsule())
     }
 }
 
 private struct EdgeHandleButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
     let isActive: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(isActive ? Color.accentColor : Color.primary.opacity(0.72))
+            .foregroundStyle(isActive ? CleanShotTheme.accent : .secondary)
             .background(
-                Color.white.opacity(configuration.isPressed || isActive ? 0.13 : 0.055),
+                CleanShotTheme.controlFill(for: colorScheme, active: configuration.isPressed || isActive),
                 in: Capsule()
             )
             .overlay(
                 Capsule()
-                    .stroke(Color.white.opacity(isActive ? 0.36 : 0.20), lineWidth: 1)
+                    .stroke(CleanShotTheme.stroke(for: colorScheme, active: isActive), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.10), radius: 10, x: 0, y: 4)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.smooth(duration: 0.12), value: configuration.isPressed)
     }
 }
 
 private struct SecondaryButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.primary)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
-            .background(Color.white.opacity(configuration.isPressed ? 0.12 : 0.06), in: Capsule())
+            .background(CleanShotTheme.controlFill(for: colorScheme, active: configuration.isPressed), in: Capsule())
             .overlay(
                 Capsule()
-                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                    .stroke(CleanShotTheme.stroke(for: colorScheme), lineWidth: 1)
             )
     }
 }
@@ -1163,11 +1502,11 @@ private struct HabitMetrics {
         let totalChecks = habits.reduce(0) { $0 + Set($1.completedDayKeys).count }
         let doneToday = habits.filter { $0.completedDayKeys.contains(todayKey) }.count
         let progressToday = totalHabits > 0 ? Double(doneToday) / Double(totalHabits) : 0
-        let perfectDays = perfectDays(for: habits)
+        let perfectDays = perfectDayKeys(for: habits)
         let bestPerfectStreak = bestStreak(for: perfectDays)
         let currentAnchor = perfectDays.contains(todayKey) ? todayKey : DateKey.key(for: DateKey.addDays(DateKey.date(from: todayKey), -1))
         let currentPerfectStreak = currentStreak(for: perfectDays, endingAt: currentAnchor)
-        let medals = medals(for: habits, perfectDays: perfectDays, totalChecks: totalChecks, bestPerfectStreak: bestPerfectStreak)
+        let medals = achievementMedals(for: habits, perfectDays: perfectDays, totalChecks: totalChecks, bestPerfectStreak: bestPerfectStreak)
 
         return HabitMetrics(
             totalHabits: totalHabits,
@@ -1216,7 +1555,7 @@ private struct HabitMetrics {
         return best
     }
 
-    private static func perfectDays(for habits: [Habit]) -> [String] {
+    private static func perfectDayKeys(for habits: [Habit]) -> [String] {
         guard !habits.isEmpty else { return [] }
 
         let allKeys = Set(habits.flatMap(\.completedDayKeys))
@@ -1225,7 +1564,7 @@ private struct HabitMetrics {
             .sorted()
     }
 
-    private static func medals(for habits: [Habit], perfectDays: [String], totalChecks: Int, bestPerfectStreak: Int) -> [Medal] {
+    private static func achievementMedals(for habits: [Habit], perfectDays: [String], totalChecks: Int, bestPerfectStreak: Int) -> [Medal] {
         [
             Medal(id: "first-perfect", title: "First Perfect Day", unlocked: !perfectDays.isEmpty, dateKey: perfectDays.first),
             Medal(id: "streak-7", title: "Streak 7", unlocked: bestPerfectStreak >= 7, dateKey: milestoneDate(in: perfectDays, threshold: 7)),
