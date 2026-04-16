@@ -1,10 +1,3 @@
-//
-//  Item.swift
-//  habit-tracker-macos
-//
-//  Created by Jashanveer Singh on 4/14/26.
-//
-
 import Foundation
 import SwiftData
 

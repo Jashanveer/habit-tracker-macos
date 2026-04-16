@@ -119,18 +119,30 @@ struct ContentView: View {
     @State private var calendarOpen = false
     @State private var settingsOpen = false
     @State private var showCelebration = false
-    #if DEBUG
-    @State private var debugShowCharacter = true
-    #endif
+    @State private var mentorNudge: String? = nil
+
+    private static let nudgeMessages = [
+        "Well done! 💪",
+        "Keep it up!",
+        "That's the way!",
+        "Proud of you!",
+        "One step closer!",
+        "You're crushing it!",
+        "Consistency wins!",
+        "Nice work! 🎉",
+        "That's a win!",
+        "Stay the course!",
+    ]
 
     private var todayKey: String { DateKey.key(for: Date()) }
     private var metrics: HabitMetrics { HabitMetrics.compute(for: habits, todayKey: todayKey) }
 
     private var showMentorCharacter: Bool {
         #if DEBUG
-        if debugShowCharacter { return true }
-        #endif
+        return true
+        #else
         return backend.dashboard?.match != nil
+        #endif
     }
 
     var body: some View {
@@ -306,7 +318,7 @@ struct ContentView: View {
         }
         .overlay(alignment: .bottom) {
             if showMentorCharacter {
-                MentorCharacterView(backend: backend)
+                MentorCharacterView(backend: backend, nudge: $mentorNudge)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -429,6 +441,10 @@ struct ContentView: View {
 
         withAnimation(.snappy(duration: 0.2)) {
             habit.completedDayKeys = keys.sorted()
+        }
+
+        if wasUnchecked && showMentorCharacter {
+            mentorNudge = Self.nudgeMessages.randomElement()
         }
 
         if wasUnchecked && habits.count > 1 {

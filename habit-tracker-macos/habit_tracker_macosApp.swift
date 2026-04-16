@@ -1,15 +1,8 @@
-//
-//  habit_tracker_macosApp.swift
-//  habit-tracker-macos
-//
-//  Created by Jashanveer Singh on 4/14/26.
-//
-
 import SwiftUI
 import SwiftData
 
 @main
-struct habit_tracker_macosApp: App {
+struct HabitTrackerMacosApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Habit.self,

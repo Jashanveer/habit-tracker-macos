@@ -6,10 +6,16 @@ import SwiftUI
 /// A walking mentor character at the bottom of the window with a floating chat bubble.
 struct MentorCharacterView: View {
     @ObservedObject var backend: HabitBackendStore
+    @Binding var nudge: String?
     @State private var walker = WalkerState()
     @State private var chatOpen = false
+    @State private var chatShown = false
+    @State private var chatAnimationTask: Task<Void, Never>? = nil
     @State private var messageText = ""
     @State private var hasUnread = false
+    @State private var visibleNudge: String? = nil
+    @State private var nudgeShown = false
+    @State private var nudgeDismissTask: Task<Void, Never>? = nil
 
     private let characterHeight: CGFloat = 130
     private let videoAspect: CGFloat = 1080 / 1920
@@ -25,16 +31,17 @@ struct MentorCharacterView: View {
     private let bubbleHeight: CGFloat = 300
     private let bubbleWidth: CGFloat = 280
     private let bubbleGap: CGFloat = 8
+    private let nudgeBubbleWidth: CGFloat = 180
 
     var body: some View {
         GeometryReader { geo in
             let charWidth = characterHeight * videoAspect
             let travelDistance = max(geo.size.width - charWidth, 0)
             let charX = walker.positionProgress * travelDistance
+            let characterHeadX = charX + charWidth / 2
             // The visible character occupies ~85% of the frame (bottom 15% is ground offset)
             let visibleCharTop = characterHeight * 0.85
 
-            // Character
             LoopingVideoView(videoName: "walk-bruce-01", isPlaying: walker.isWalking)
                 .frame(width: charWidth, height: characterHeight)
                 .scaleEffect(x: walker.goingRight ? 1 : -1, y: 1, anchor: .center)
@@ -43,13 +50,9 @@ struct MentorCharacterView: View {
                     y: geo.size.height - characterHeight / 2 + characterHeight * 0.15
                 )
                 .onTapGesture {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                        chatOpen.toggle()
-                        if chatOpen { hasUnread = false }
-                    }
+                    toggleChat()
                 }
 
-            // Unread indicator
             if hasUnread && !chatOpen {
                 Circle()
                     .fill(.red)
@@ -68,11 +71,10 @@ struct MentorCharacterView: View {
             // Chat bubble — positioned just above the character's head
             if chatOpen {
                 let bubbleY = geo.size.height - visibleCharTop - bubbleGap - bubbleHeight / 2
-                let bubbleCenterX = charX + charWidth / 2
-                let clampedX = min(max(bubbleCenterX, bubbleWidth / 2 + 8), geo.size.width - bubbleWidth / 2 - 8)
-                // Anchor point so the bubble scales from the character's head
+                let bubbleCenterX = characterHeadX
+                let clampedX = clamped(bubbleCenterX, lowerBound: bubbleWidth / 2 + 8, upperBound: geo.size.width - bubbleWidth / 2 - 8)
                 let anchorX = (bubbleCenterX - (clampedX - bubbleWidth / 2)) / bubbleWidth
-                let scaleAnchor = UnitPoint(x: min(max(anchorX, 0), 1), y: 1)
+                let scaleAnchor = UnitPoint(x: clamped(anchorX, lowerBound: 0, upperBound: 1), y: 1)
 
                 MentorChatBubble(
                     mentorName: mentorName,
@@ -80,15 +82,35 @@ struct MentorCharacterView: View {
                     messageText: $messageText,
                     onSend: sendMessage,
                     onClose: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                            chatOpen = false
-                        }
+                        closeChat()
                     }
                 )
                 .frame(width: bubbleWidth, height: bubbleHeight)
+                .scaleEffect(chatShown ? 1 : 0.05, anchor: scaleAnchor)
+                .opacity(chatShown ? 1 : 0)
                 .position(x: clampedX, y: bubbleY)
-                .transition(.scale(scale: 0.3, anchor: scaleAnchor).combined(with: .opacity))
+                .animation(.spring(response: 0.35, dampingFraction: 0.78), value: chatShown)
                 .zIndex(10)
+            }
+
+            if let text = visibleNudge {
+                let nudgeCenterX = clamped(
+                    characterHeadX,
+                    lowerBound: nudgeBubbleWidth / 2 + 8,
+                    upperBound: geo.size.width - nudgeBubbleWidth / 2 - 8
+                )
+                let nudgeAnchorX = (characterHeadX - (nudgeCenterX - nudgeBubbleWidth / 2)) / nudgeBubbleWidth
+                let clampedNudgeAnchorX = clamped(nudgeAnchorX, lowerBound: 0, upperBound: 1)
+                let nudgeAnchor = UnitPoint(x: clampedNudgeAnchorX, y: 1)
+                let nudgeBubbleY = geo.size.height - visibleCharTop - bubbleGap - 22
+
+                SpeechBubbleNudge(text: text, width: nudgeBubbleWidth, tailAnchorX: clampedNudgeAnchorX)
+                    .scaleEffect(nudgeShown ? 1 : 0.01, anchor: nudgeAnchor)
+                    .opacity(nudgeShown ? 1 : 0)
+                    .position(x: nudgeCenterX, y: nudgeBubbleY)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.65), value: nudgeShown)
+                    .zIndex(11)
+                    .allowsHitTesting(false)
             }
 
             Color.clear
@@ -104,16 +126,79 @@ struct MentorCharacterView: View {
                         hasUnread = true
                     }
                 }
+                .onChange(of: nudge) { _, newValue in
+                    guard let msg = newValue else { return }
+                    nudgeDismissTask?.cancel()
+                    nudge = nil
+                    visibleNudge = msg
+                    nudgeShown = false
+                    DispatchQueue.main.async {
+                        nudgeShown = true
+                    }
+                    nudgeDismissTask = Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            nudgeShown = false
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                visibleNudge = nil
+                            }
+                        }
+                    }
+                }
         }
         .frame(height: chatOpen ? characterHeight + bubbleHeight + bubbleGap : characterHeight)
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: chatOpen)
     }
 
-    private func clampBubbleX(charX: CGFloat, bubbleWidth: CGFloat, containerWidth: CGFloat) -> CGFloat {
-        let idealX = charX - bubbleWidth / 2
-        let minX: CGFloat = 8
-        let maxX = containerWidth - bubbleWidth - 8
-        return min(max(idealX, minX), maxX)
+    private func toggleChat() {
+        if chatOpen {
+            closeChat()
+        } else {
+            openChat()
+        }
+    }
+
+    private func openChat() {
+        chatAnimationTask?.cancel()
+        hasUnread = false
+        chatShown = false
+
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            chatOpen = true
+        }
+
+        chatAnimationTask = Task {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                    chatShown = true
+                }
+            }
+        }
+    }
+
+    private func closeChat() {
+        chatAnimationTask?.cancel()
+
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+            chatShown = false
+        }
+
+        chatAnimationTask = Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    chatOpen = false
+                }
+            }
+        }
+    }
+
+    private func clamped(_ value: CGFloat, lowerBound: CGFloat, upperBound: CGFloat) -> CGFloat {
+        min(max(value, lowerBound), upperBound)
     }
 
     private func sendMessage() {
@@ -121,8 +206,6 @@ struct MentorCharacterView: View {
         guard !text.isEmpty else { return }
         messageText = ""
 
-        // TODO: Wire to backend send-message API when available
-        // For now this clears the field; the mentor's replies come via dashboard refresh
         Task {
             await backend.refreshDashboard()
         }
@@ -242,20 +325,12 @@ private struct ChatMessageRow: View {
     let message: AccountabilityDashboard.Message
     @Environment(\.colorScheme) private var colorScheme
 
-    // Messages from the mentor (senderId != current user) appear on the left
-    // For simplicity, assume nudge messages and named senders are from the mentor
-    private var isFromMentor: Bool { true }
-
     var body: some View {
         HStack {
-            if !isFromMentor { Spacer(minLength: 40) }
-
-            VStack(alignment: isFromMentor ? .leading : .trailing, spacing: 2) {
-                if isFromMentor {
-                    Text(message.senderName)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message.senderName)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
 
                 Text(message.message)
                     .font(.system(size: 12))
@@ -271,18 +346,81 @@ private struct ChatMessageRow: View {
                 }
             }
 
-            if isFromMentor { Spacer(minLength: 40) }
+            Spacer(minLength: 40)
         }
     }
 
     private var messageBubbleColor: Color {
-        if isFromMentor {
-            return colorScheme == .dark
-                ? Color.white.opacity(0.08)
-                : Color(red: 0.93, green: 0.93, blue: 0.95)
-        } else {
-            return Color.blue.opacity(0.85)
+        colorScheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color(red: 0.93, green: 0.93, blue: 0.95)
+    }
+}
+
+// MARK: - Speech Bubble Nudge
+
+private struct SpeechBubbleNudge: View {
+    let text: String
+    let width: CGFloat
+    let tailAnchorX: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(colorScheme == .dark ? .white : .black)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .frame(width: width)
+                .background(backgroundColor)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.22), radius: 8, y: 3)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(strokeColor, lineWidth: 0.5)
+                )
+
+            HStack(spacing: 0) {
+                Spacer()
+                    .frame(width: tailOffset)
+
+                Triangle()
+                    .fill(backgroundColor)
+                    .frame(width: 12, height: 7)
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: width, alignment: .leading)
         }
+    }
+
+    private var backgroundColor: Color {
+        colorScheme == .dark
+            ? Color(red: 0.18, green: 0.19, blue: 0.22)
+            : Color.white
+    }
+
+    private var strokeColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.12)
+            : Color.black.opacity(0.08)
+    }
+
+    private var tailOffset: CGFloat {
+        max(0, min(width - 12, width * tailAnchorX - 6))
+    }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -407,7 +545,7 @@ private struct LoopingVideoView: NSViewRepresentable {
             return view
         }
 
-        let asset = AVAsset(url: url)
+        let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
         let player = AVQueuePlayer(playerItem: item)
         let looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(asset: asset))
