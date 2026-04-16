@@ -145,6 +145,14 @@ struct ContentView: View {
         #endif
     }
 
+    private var showMenteeCharacter: Bool {
+        #if DEBUG
+        return true
+        #else
+        return (backend.dashboard?.mentorDashboard.activeMenteeCount ?? 0) > 0
+        #endif
+    }
+
     var body: some View {
         ZStack {
             MinimalBackground()
@@ -319,6 +327,12 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             if showMentorCharacter && backend.isAuthenticated {
                 MentorCharacterView(backend: backend, nudge: $mentorNudge)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showMenteeCharacter && backend.isAuthenticated {
+                MenteeCharacterView(backend: backend)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

@@ -29,22 +29,9 @@
 		9BA6DB152F8F3C90009AA3BC /* habit-tracker-macosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "habit-tracker-macosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		9B5CE8C32F91A501003CCB94 /* Exceptions for "habit-tracker-macos" folder in "habit-tracker-macos" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"habit-tracker-macos.entitlements",
-			);
-			target = 9BA6DAFB2F8F3C8E009AA3BC /* habit-tracker-macos */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9BA6DAFE2F8F3C8E009AA3BC /* habit-tracker-macos */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				9B5CE8C32F91A501003CCB94 /* Exceptions for "habit-tracker-macos" folder in "habit-tracker-macos" target */,
-			);
 			path = "habit-tracker-macos";
 			sourceTree = "<group>";
 		};

@@ -212,6 +212,294 @@ struct MentorCharacterView: View {
     }
 }
 
+// MARK: - Mentee Character + Chat Bubble
+
+/// A walking mentee character — visually distinct from the mentor (purple tint, offset start).
+/// Represents a person the current user is mentoring in the social hub.
+struct MenteeCharacterView: View {
+    @ObservedObject var backend: HabitBackendStore
+    @State private var walker = WalkerState()
+    @State private var chatOpen = false
+    @State private var chatShown = false
+    @State private var chatAnimationTask: Task<Void, Never>? = nil
+    @State private var hasAttention = false
+
+    private let characterHeight: CGFloat = 130
+    private let videoAspect: CGFloat = 1080 / 1920
+
+    private var mentee: AccountabilityDashboard.MenteeSummary {
+        if let real = backend.dashboard?.mentorDashboard.mentees.first {
+            return real
+        }
+        // Fallback shown in DEBUG / before dashboard loads
+        return AccountabilityDashboard.MenteeSummary(
+            matchId: 0,
+            userId: 0,
+            displayName: "Alex",
+            missedHabitsToday: 2,
+            weeklyConsistencyPercent: 68,
+            suggestedAction: "Send a quick check-in — they've missed 2 habits today."
+        )
+    }
+
+    private let bubbleHeight: CGFloat = 252
+    private let bubbleWidth: CGFloat = 260
+    private let bubbleGap: CGFloat = 8
+
+    var body: some View {
+        GeometryReader { geo in
+            let charWidth = characterHeight * videoAspect
+            let travelDistance = max(geo.size.width - charWidth, 0)
+            let charX = walker.positionProgress * travelDistance
+            let characterHeadX = charX + charWidth / 2
+            let visibleCharTop = characterHeight * 0.85
+
+            // Jazz — the orange lil-agent character
+            LoopingVideoView(videoName: "walk-jazz-01", isPlaying: walker.isWalking)
+                .frame(width: charWidth, height: characterHeight)
+                .scaleEffect(x: walker.goingRight ? 1 : -1, y: 1, anchor: .center)
+            .position(
+                x: charX + charWidth / 2,
+                y: geo.size.height - characterHeight / 2 + characterHeight * 0.15
+            )
+            .onTapGesture { toggleChat() }
+
+            // Attention badge when mentee missed habits today
+            if hasAttention && !chatOpen {
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 14, height: 14)
+                    .overlay(
+                        Image(systemName: "exclamationmark")
+                            .font(.system(size: 8, weight: .black))
+                            .foregroundStyle(.white)
+                    )
+                    .position(
+                        x: charX + charWidth - 4,
+                        y: geo.size.height - visibleCharTop - 4
+                    )
+            }
+
+            // Chat bubble anchored above the character's head
+            if chatOpen {
+                let bubbleY = geo.size.height - visibleCharTop - bubbleGap - bubbleHeight / 2
+                let clampedX = clamped(characterHeadX, lowerBound: bubbleWidth / 2 + 8, upperBound: geo.size.width - bubbleWidth / 2 - 8)
+                let anchorX = (characterHeadX - (clampedX - bubbleWidth / 2)) / bubbleWidth
+                let scaleAnchor = UnitPoint(x: clamped(anchorX, lowerBound: 0, upperBound: 1), y: 1)
+
+                MenteeChatBubble(mentee: mentee, onSend: sendMessage, onClose: closeChat)
+                    .frame(width: bubbleWidth, height: bubbleHeight)
+                    .scaleEffect(chatShown ? 1 : 0.05, anchor: scaleAnchor)
+                    .opacity(chatShown ? 1 : 0)
+                    .position(x: clampedX, y: bubbleY)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.78), value: chatShown)
+                    .zIndex(10)
+            }
+
+            Color.clear
+                .onAppear {
+                    // Start mentee on the right side so they walk toward the mentor
+                    walker.positionProgress = 0.7
+                    walker.goingRight = false
+                    walker.travelDistance = travelDistance
+                    walker.start()
+                    hasAttention = mentee.missedHabitsToday > 0
+                }
+                .onChange(of: geo.size.width) { _, _ in
+                    walker.travelDistance = travelDistance
+                }
+                .onChange(of: mentee.missedHabitsToday) { _, new in
+                    if !chatOpen { hasAttention = new > 0 }
+                }
+        }
+        .frame(height: chatOpen ? characterHeight + bubbleHeight + bubbleGap : characterHeight)
+        .animation(.spring(response: 0.35, dampingFraction: 0.82), value: chatOpen)
+    }
+
+    private func toggleChat() { chatOpen ? closeChat() : openChat() }
+
+    private func openChat() {
+        chatAnimationTask?.cancel()
+        hasAttention = false
+        chatShown = false
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { chatOpen = true }
+        chatAnimationTask = Task {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) { chatShown = true }
+            }
+        }
+    }
+
+    private func closeChat() {
+        chatAnimationTask?.cancel()
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { chatShown = false }
+        chatAnimationTask = Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) { chatOpen = false }
+            }
+        }
+    }
+
+    private func sendMessage(_ text: String) {
+        let matchId = backend.dashboard?.mentorDashboard.mentees.first?.matchId ?? mentee.matchId
+        Task { await backend.sendMenteeMessage(matchId: matchId, message: text) }
+    }
+
+    private func clamped(_ value: CGFloat, lowerBound: CGFloat, upperBound: CGFloat) -> CGFloat {
+        min(max(value, lowerBound), upperBound)
+    }
+}
+
+private struct MenteeChatBubble: View {
+    let mentee: AccountabilityDashboard.MenteeSummary
+    let onSend: (String) -> Void
+    let onClose: () -> Void
+
+    @State private var messageText = ""
+    @State private var isSending = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Title bar — orange accent to match Jazz character
+            HStack {
+                Circle()
+                    .fill(.orange)
+                    .frame(width: 8, height: 8)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(mentee.displayName)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Your mentee")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(titleBarColor)
+
+            Divider()
+
+            // Mentee stats
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "chart.bar.fill")
+                        .foregroundStyle(.orange)
+                        .font(.system(size: 12))
+                    Text("Weekly consistency")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(mentee.weeklyConsistencyPercent)%")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(consistencyColor)
+                }
+
+                HStack {
+                    Image(systemName: mentee.missedHabitsToday > 0 ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(mentee.missedHabitsToday > 0 ? Color.orange : Color.green)
+                        .font(.system(size: 12))
+                    Text("Missed today")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(mentee.missedHabitsToday == 0
+                         ? "All done!"
+                         : "\(mentee.missedHabitsToday) habit\(mentee.missedHabitsToday == 1 ? "" : "s")")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(mentee.missedHabitsToday > 0 ? Color.orange : Color.green)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Suggested action", systemImage: "lightbulb.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.orange)
+                    Text(mentee.suggestedAction)
+                        .font(.system(size: 11))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(colorScheme == .dark ? 0.15 : 0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+            .padding(12)
+
+            Divider()
+
+            // Input row
+            HStack(spacing: 8) {
+                TextField("Cheer them up...", text: $messageText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .disabled(isSending)
+                    .onSubmit { submitMessage() }
+
+                Button(action: submitMessage) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(
+                            messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending
+                                ? Color.secondary : Color.orange
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(bubbleBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.18), radius: 16, y: 6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(
+                    Color.orange.opacity(colorScheme == .dark ? 0.3 : 0.2),
+                    lineWidth: 0.5
+                )
+        )
+    }
+
+    private func submitMessage() {
+        let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending else { return }
+        isSending = true
+        messageText = ""
+        onSend(text)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { isSending = false }
+    }
+
+    private var consistencyColor: Color {
+        mentee.weeklyConsistencyPercent >= 70 ? .green
+            : mentee.weeklyConsistencyPercent >= 40 ? .orange
+            : .red
+    }
+
+    private var titleBarColor: Color {
+        colorScheme == .dark
+            ? Color(red: 0.18, green: 0.14, blue: 0.11)
+            : Color(red: 1.0, green: 0.97, blue: 0.94)
+    }
+
+    private var bubbleBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 0.14, green: 0.11, blue: 0.09)
+            : Color.white
+    }
+}
+
 // MARK: - Chat Bubble View
 
 private struct MentorChatBubble: View {
@@ -225,13 +513,18 @@ private struct MentorChatBubble: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Title bar
+            // Title bar — green theme
             HStack {
                 Circle()
                     .fill(.green)
                     .frame(width: 8, height: 8)
-                Text(mentorName)
-                    .font(.system(size: 13, weight: .semibold))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(mentorName)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Your mentor")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark.circle.fill")
@@ -276,7 +569,7 @@ private struct MentorChatBubble: View {
 
             Divider()
 
-            // Input
+            // Input row
             HStack(spacing: 8) {
                 TextField("Message...", text: $messageText)
                     .textFieldStyle(.plain)
@@ -286,7 +579,10 @@ private struct MentorChatBubble: View {
                 Button(action: onSend) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(
+                            messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? Color.secondary : Color.green
+                        )
                 }
                 .buttonStyle(.plain)
                 .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -300,9 +596,7 @@ private struct MentorChatBubble: View {
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(
-                    colorScheme == .dark
-                        ? Color.white.opacity(0.12)
-                        : Color.black.opacity(0.08),
+                    Color.green.opacity(colorScheme == .dark ? 0.3 : 0.2),
                     lineWidth: 0.5
                 )
         )
@@ -310,13 +604,13 @@ private struct MentorChatBubble: View {
 
     private var titleBarColor: Color {
         colorScheme == .dark
-            ? Color(red: 0.14, green: 0.15, blue: 0.17)
-            : Color(red: 0.96, green: 0.96, blue: 0.98)
+            ? Color(red: 0.11, green: 0.15, blue: 0.12)
+            : Color(red: 0.94, green: 0.98, blue: 0.95)
     }
 
     private var bubbleBackground: Color {
         colorScheme == .dark
-            ? Color(red: 0.11, green: 0.12, blue: 0.14)
+            ? Color(red: 0.09, green: 0.12, blue: 0.10)
             : Color.white
     }
 }

@@ -264,6 +264,15 @@ final class HabitBackendStore: ObservableObject {
         }
     }
 
+    func sendMenteeMessage(matchId: Int64, message: String) async {
+        guard let token else { return }
+        do {
+            dashboard = try await client.sendMenteeMessage(matchId: matchId, message: message, token: token)
+        } catch {
+            handleAuthenticatedRequestError(error)
+        }
+    }
+
     func requestFriend(userID: Int64) async {
         guard let token else { return }
 
@@ -401,6 +410,15 @@ private struct HabitBackendClient {
         try await request(path: "/api/accountability/friends/\(friendUserID)", method: "POST", token: token)
     }
 
+    func sendMenteeMessage(matchId: Int64, message: String, token: String) async throws -> AccountabilityDashboard {
+        try await request(
+            path: "/api/accountability/matches/\(matchId)/messages",
+            method: "POST",
+            token: token,
+            body: MentorshipMessageRequest(message: message)
+        )
+    }
+
     private func request<Response: Decodable>(
         path: String,
         method: String,
@@ -485,6 +503,10 @@ private struct HabitBackendClient {
 
     private struct HabitCreateRequest: Encodable {
         let title: String
+    }
+
+    private struct MentorshipMessageRequest: Encodable {
+        let message: String
     }
 
     private struct CheckUpdateRequest: Encodable {
