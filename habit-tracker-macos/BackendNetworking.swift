@@ -1,5 +1,17 @@
 import Foundation
 
+enum BackendEnvironment {
+    nonisolated static let baseURL = URL(string: "http://127.0.0.1:8080")!
+
+    nonisolated static var displayHost: String {
+        guard let host = baseURL.host else { return baseURL.absoluteString }
+        if let port = baseURL.port {
+            return "\(host):\(port)"
+        }
+        return host
+    }
+}
+
 // MARK: - RequestState
 
 enum RequestState<Value> {
@@ -31,8 +43,8 @@ struct RetryPolicy {
     /// Upper bound on the computed delay.
     let maxDelay: TimeInterval
 
-    static let `default` = RetryPolicy(maxAttempts: 3, baseDelay: 0.5, maxDelay: 8)
-    static let none      = RetryPolicy(maxAttempts: 1, baseDelay: 0,   maxDelay: 0)
+    nonisolated static let `default` = RetryPolicy(maxAttempts: 3, baseDelay: 0.5, maxDelay: 8)
+    nonisolated static let none      = RetryPolicy(maxAttempts: 1, baseDelay: 0,   maxDelay: 0)
 
     /// Delay (seconds) before attempt `attempt` (0-indexed).
     func delay(for attempt: Int) -> TimeInterval {
@@ -168,7 +180,7 @@ struct MatchStreamMessageReadEvent: Decodable {
 // MARK: - BackendAPIClient
 
 actor BackendAPIClient {
-    private let baseURL = URL(string: "http://127.0.0.1:8080")!
+    private let baseURL = BackendEnvironment.baseURL
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private var session: BackendSession?
@@ -192,10 +204,29 @@ actor BackendAPIClient {
         let s = BackendSession.fromAuthTokens(tokens); session = s; return s
     }
 
-    func register(username: String, email: String, password: String, avatarURL: String) async throws -> BackendSession {
+    func requestEmailVerification(email: String) async throws {
+        let _: MessageResponse = try await request(
+            path: "/api/auth/email-verification", method: "POST",
+            body: EmailVerificationRequest(email: email)
+        )
+    }
+
+    func register(
+        username: String,
+        email: String,
+        password: String,
+        avatarURL: String,
+        verificationCode: String
+    ) async throws -> BackendSession {
         let tokens: BackendAuthTokens = try await request(
             path: "/api/auth/register", method: "POST",
-            body: RegisterRequest(username: username, email: email, password: password, avatarUrl: avatarURL)
+            body: RegisterRequest(
+                username: username,
+                email: email,
+                password: password,
+                avatarUrl: avatarURL,
+                verificationCode: verificationCode
+            )
         )
         let s = BackendSession.fromAuthTokens(tokens); session = s; return s
     }
@@ -315,12 +346,20 @@ actor BackendAPIClient {
                     ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
                 throw HabitBackendError.server(msg)
             }
-            if Response.self == EmptyResponse.self { return EmptyResponse() as! Response }
+            if Response.self == EmptyResponse.self, let empty = EmptyResponse() as? Response {
+                return empty
+            }
             return try decoder.decode(Response.self, from: data)
         } catch let error as HabitBackendError {
             throw error
         } catch {
-            throw HabitBackendError.network(error.localizedDescription)
+            if let urlError = error as? URLError {
+                throw HabitBackendError.network(urlError.localizedDescription)
+            }
+            if error is DecodingError {
+                throw HabitBackendError.invalidResponse
+            }
+            throw HabitBackendError.invalidResponse
         }
     }
 
@@ -341,8 +380,10 @@ actor BackendAPIClient {
     // MARK: Private DTOs
 
     private struct LoginRequest:    Encodable { let username: String; let password: String }
-    private struct RegisterRequest: Encodable { let username, email, password, avatarUrl: String }
+    private struct EmailVerificationRequest: Encodable { let email: String }
+    private struct RegisterRequest: Encodable { let username, email, password, avatarUrl, verificationCode: String }
     private struct RefreshRequest:  Encodable { let refreshToken: String }
+    private struct MessageResponse: Decodable { let message: String }
     private struct ApiErrorResponse: Decodable { let message: String }
     private struct EmptyResponse: Decodable {}
 }
@@ -356,8 +397,24 @@ struct AuthRepository {
         try await client.login(username: username, password: password)
     }
 
-    func register(username: String, email: String, password: String, avatarURL: String) async throws -> BackendSession {
-        try await client.register(username: username, email: email, password: password, avatarURL: avatarURL)
+    func requestEmailVerification(email: String) async throws {
+        try await client.requestEmailVerification(email: email)
+    }
+
+    func register(
+        username: String,
+        email: String,
+        password: String,
+        avatarURL: String,
+        verificationCode: String
+    ) async throws -> BackendSession {
+        try await client.register(
+            username: username,
+            email: email,
+            password: password,
+            avatarURL: avatarURL,
+            verificationCode: verificationCode
+        )
     }
 }
 
@@ -438,7 +495,19 @@ struct AccountabilityRepository {
         )
     }
 
+    func useStreakFreeze(dateKey: String) async throws -> AccountabilityDashboard {
+        try await client.authorizedRequest(
+            path: "/api/accountability/streak-freeze/use", method: "POST",
+            body: StreakFreezeRequest(dateKey: dateKey)
+        )
+    }
+
+    func sendNudge(matchId: Int64) async throws -> AccountabilityDashboard {
+        try await client.authorizedRequest(path: "/api/accountability/matches/\(matchId)/nudge", method: "POST")
+    }
+
     private struct MentorshipMessageRequest: Encodable { let message: String }
+    private struct StreakFreezeRequest: Encodable { let dateKey: String }
     private struct EmptyResponse: Decodable {}
 }
 
@@ -455,7 +524,7 @@ enum HabitBackendError: LocalizedError {
         case .notAuthenticated: return "Session expired. Sign in again to sync with the backend."
         case .invalidResponse:  return "The backend returned an invalid response."
         case .server(let m):    return m
-        case .network(let m):   return "Could not reach localhost:8080. \(m)"
+        case .network(let m):   return "Could not reach \(BackendEnvironment.displayHost). \(m)"
         }
     }
 

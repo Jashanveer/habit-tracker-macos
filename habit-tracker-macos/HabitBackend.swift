@@ -23,6 +23,28 @@ struct AccountabilityDashboard: Decodable {
     let social: SocialDashboard?
     let feed: [SocialPost]
     let notifications: [Notification]
+    let habitClusters: [HabitTimeCluster]
+
+    private enum CodingKeys: String, CodingKey {
+        case profile, level, match, menteeDashboard, mentorDashboard, mentorship
+        case rewards, weeklyChallenge, social, feed, notifications, habitClusters
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        profile           = try c.decode(Profile.self,            forKey: .profile)
+        level             = try c.decode(Level.self,              forKey: .level)
+        match             = try c.decodeIfPresent(MentorMatch.self, forKey: .match)
+        menteeDashboard   = try c.decode(MenteeDashboard.self,    forKey: .menteeDashboard)
+        mentorDashboard   = try c.decode(MentorDashboard.self,    forKey: .mentorDashboard)
+        mentorship        = try c.decodeIfPresent(MentorshipStatus.self, forKey: .mentorship)
+        rewards           = try c.decode(Rewards.self,            forKey: .rewards)
+        weeklyChallenge   = try c.decode(WeeklyChallenge.self,    forKey: .weeklyChallenge)
+        social            = try c.decodeIfPresent(SocialDashboard.self, forKey: .social)
+        feed              = try c.decodeIfPresent([SocialPost].self, forKey: .feed) ?? []
+        notifications     = try c.decodeIfPresent([Notification].self, forKey: .notifications) ?? []
+        habitClusters     = try c.decodeIfPresent([HabitTimeCluster].self, forKey: .habitClusters) ?? []
+    }
 
     struct Profile: Decodable {
         let userId: Int64; let username: String?; let email: String
@@ -62,7 +84,44 @@ struct AccountabilityDashboard: Decodable {
         let missedHabitsToday: Int; let weeklyConsistencyPercent: Int
         let suggestedAction: String
     }
-    struct Rewards: Decodable { let xp: Int; let coins: Int; let badges: [String] }
+    struct Rewards: Decodable {
+        let xp: Int
+        let badges: [String]
+        /// How many unique habit-day checks have already earned XP today.
+        let checksToday: Int
+        /// Server-side daily cap. Checks beyond this still track but earn 0 XP.
+        let dailyCap: Int
+        /// False once the daily cap is reached — UI should show a "cap reached" indicator.
+        let rewardEligible: Bool
+        /// Number of streak freeze tokens the user has available.
+        let freezesAvailable: Int
+        /// "YYYY-MM-DD" dates that have been protected by a streak freeze.
+        let frozenDates: [String]
+
+        private enum CodingKeys: String, CodingKey {
+            case xp, badges, checksToday, dailyCap, rewardEligible
+            case freezesAvailable, frozenDates
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            xp               = try c.decode(Int.self,    forKey: .xp)
+            badges           = try c.decodeIfPresent([String].self, forKey: .badges) ?? []
+            checksToday      = try c.decode(Int.self,    forKey: .checksToday)
+            dailyCap         = try c.decode(Int.self,    forKey: .dailyCap)
+            rewardEligible   = try c.decode(Bool.self,   forKey: .rewardEligible)
+            freezesAvailable = try c.decodeIfPresent(Int.self,    forKey: .freezesAvailable) ?? 0
+            frozenDates      = try c.decodeIfPresent([String].self, forKey: .frozenDates) ?? []
+        }
+    }
+    struct HabitTimeCluster: Decodable, Identifiable {
+        var id: Int64 { habitId }
+        let habitId: Int64
+        let habitTitle: String
+        let timeSlot: String
+        let avgHourOfDay: Int
+        let sampleSize: Int
+    }
     struct WeeklyChallenge: Decodable {
         let title: String; let description: String
         let completedPerfectDays: Int; let targetPerfectDays: Int
@@ -120,6 +179,7 @@ final class HabitBackendStore: ObservableObject {
     @Published private(set) var mentorRequestState:      RequestState<Void>                    = .idle
     @Published private(set) var messageRequestState:     RequestState<Void>                    = .idle
     @Published private(set) var friendRequestState:      RequestState<Void>                    = .idle
+    @Published private(set) var streakFreezeRequestState: RequestState<Void>                   = .idle
     @Published private(set) var streamRequestState:      RequestState<Void>                    = .idle
     @Published private(set) var liveMessagesByMatch:     [Int64: [AccountabilityDashboard.Message]] = [:]
 
@@ -136,6 +196,8 @@ final class HabitBackendStore: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var streamingMatchID: Int64?
     private var lastStreamEventID: String?
+    private var lastSentMessageAt: Date?
+    private var lastSentMessageText: String?
 
     var isAuthenticated: Bool { token != nil }
 
@@ -165,7 +227,7 @@ final class HabitBackendStore: ObservableObject {
         do {
             let session = try await authRepository.signIn(username: username, password: password)
             applySession(session)
-            statusMessage = "Connected to localhost:8080"
+            statusMessage = "Connected to \(BackendEnvironment.displayHost)"
             errorMessage = nil
             authRequestState = .success(())
         } catch {
@@ -175,14 +237,38 @@ final class HabitBackendStore: ObservableObject {
         refreshSyncingState()
     }
 
-    func register(username: String, email: String, password: String, avatarURL: String) async {
+    func requestEmailVerification(email: String) async {
+        authRequestState = .loading; refreshSyncingState()
+        do {
+            try await authRepository.requestEmailVerification(email: email)
+            statusMessage = "Verification code sent to \(email)"
+            errorMessage = nil
+            authRequestState = .success(())
+        } catch {
+            errorMessage = error.localizedDescription
+            authRequestState = .failure(error.localizedDescription)
+        }
+        refreshSyncingState()
+    }
+
+    func register(
+        username: String,
+        email: String,
+        password: String,
+        avatarURL: String,
+        verificationCode: String
+    ) async {
         authRequestState = .loading; refreshSyncingState()
         do {
             let session = try await authRepository.register(
-                username: username, email: email, password: password, avatarURL: avatarURL
+                username: username,
+                email: email,
+                password: password,
+                avatarURL: avatarURL,
+                verificationCode: verificationCode
             )
             applySession(session)
-            statusMessage = "Connected to localhost:8080"
+            statusMessage = "Connected to \(BackendEnvironment.displayHost)"
             errorMessage = nil
             authRequestState = .success(())
         } catch {
@@ -327,9 +413,29 @@ final class HabitBackendStore: ObservableObject {
 
     func sendMenteeMessage(matchId: Int64, message: String) async {
         guard token != nil else { return }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let now = Date()
+        if let lastAt = lastSentMessageAt, now.timeIntervalSince(lastAt) < 0.8 {
+            statusMessage = "You're sending too fast. Try again."
+            return
+        }
+        if
+            let lastText = lastSentMessageText,
+            let lastAt = lastSentMessageAt,
+            now.timeIntervalSince(lastAt) < 5,
+            lastText.caseInsensitiveCompare(trimmed) == .orderedSame
+        {
+            statusMessage = "Duplicate message blocked."
+            return
+        }
+
+        lastSentMessageAt = now
+        lastSentMessageText = trimmed
         messageRequestState = .loading; refreshSyncingState()
         do {
-            let value = try await accountabilityRepository.sendMenteeMessage(matchId: matchId, message: message)
+            let value = try await accountabilityRepository.sendMenteeMessage(matchId: matchId, message: trimmed)
             await syncSessionFromClient()
             await responseCache.invalidateDashboard()
             applyDashboardUpdate(value)
@@ -360,6 +466,24 @@ final class HabitBackendStore: ObservableObject {
         refreshSyncingState()
     }
 
+    func useStreakFreeze(dateKey: String) async {
+        guard token != nil else { return }
+        streakFreezeRequestState = .loading; refreshSyncingState()
+        do {
+            let value = try await accountabilityRepository.useStreakFreeze(dateKey: dateKey)
+            await syncSessionFromClient()
+            await responseCache.invalidateDashboard()
+            applyDashboardUpdate(value)
+            statusMessage = "Streak freeze applied for \(dateKey)"
+            errorMessage = nil
+            streakFreezeRequestState = .success(())
+        } catch {
+            handleAuthenticatedRequestError(error)
+            streakFreezeRequestState = .failure(error.localizedDescription)
+        }
+        refreshSyncingState()
+    }
+
     func registerDeviceToken(_ token: Data) async {
         guard isAuthenticated else { return }
         let hex = token.map { String(format: "%02.2hhx", $0) }.joined()
@@ -369,6 +493,18 @@ final class HabitBackendStore: ObservableObject {
     func markMatchRead(matchID: Int64?) async {
         guard let matchID, token != nil else { return }
         do { try await accountabilityRepository.markMatchRead(matchId: matchID) } catch {
+            handleAuthenticatedRequestError(error)
+        }
+    }
+
+    func sendNudge(matchId: Int64) async {
+        guard token != nil else { return }
+        do {
+            let value = try await accountabilityRepository.sendNudge(matchId: matchId)
+            await syncSessionFromClient()
+            await responseCache.invalidateDashboard()
+            applyDashboardUpdate(value)
+        } catch {
             handleAuthenticatedRequestError(error)
         }
     }
@@ -398,6 +534,7 @@ final class HabitBackendStore: ObservableObject {
         streamingMatchID = nil
         lastStreamEventID = nil
         streamRequestState = .idle
+        refreshSyncingState()
     }
 
     private func runStreamLoop(matchID: Int64) async {
@@ -407,6 +544,7 @@ final class HabitBackendStore: ObservableObject {
         while !Task.isCancelled, streamingMatchID == matchID, isAuthenticated {
             do {
                 streamRequestState = .loading
+                refreshSyncingState()
                 let request = try await accountabilityRepository.streamRequest(
                     matchId: matchID, lastEventID: lastStreamEventID
                 )
@@ -418,10 +556,12 @@ final class HabitBackendStore: ObservableObject {
                 hadSuccessfulConnection = true
                 backoffSeconds = 1  // reset on successful connect
                 streamRequestState = .success(())
+                refreshSyncingState()
                 try await consumeSSELines(matchID: matchID, lines: bytes.lines)
             } catch {
                 if Task.isCancelled { return }
                 streamRequestState = .failure(error.localizedDescription)
+                refreshSyncingState()
                 // Exponential backoff for stream reconnects (cap at 30s)
                 try? await Task.sleep(for: .seconds(backoffSeconds))
                 backoffSeconds = min(backoffSeconds * 2, 30)
@@ -505,6 +645,7 @@ final class HabitBackendStore: ObservableObject {
             || messageRequestState.isLoading
             || friendRequestState.isLoading
             || streamRequestState.isLoading
+            || streakFreezeRequestState.isLoading
     }
 
     // MARK: - Session persistence
@@ -523,6 +664,7 @@ final class HabitBackendStore: ObservableObject {
     private func clearSession(errorMessage: String? = nil) {
         stopStream()
         token = nil; dashboard = nil; liveMessagesByMatch = [:]
+        lastSentMessageAt = nil; lastSentMessageText = nil
         statusMessage = nil; self.errorMessage = errorMessage
         Self.saveSession(nil, key: sessionKey)
         UserDefaults.standard.removeObject(forKey: "habitTracker.localhost.token")
@@ -530,6 +672,7 @@ final class HabitBackendStore: ObservableObject {
         createHabitRequestState = .idle; checkUpdateRequestState = .idle
         deleteHabitRequestState = .idle; mentorRequestState = .idle
         messageRequestState = .idle; friendRequestState = .idle
+        streakFreezeRequestState = .idle
         Task { await responseCache.invalidateAll() }
         refreshSyncingState()
     }

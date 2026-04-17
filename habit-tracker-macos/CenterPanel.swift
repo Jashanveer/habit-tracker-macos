@@ -7,6 +7,7 @@ struct CenterPanel: View {
     @Binding var newHabitTitle: String
 
     let metrics: HabitMetrics
+    var clusters: [AccountabilityDashboard.HabitTimeCluster] = []
     let onAddHabit: () -> Void
     let onToggleHabit: (Habit) -> Void
     let onDeleteHabit: (Habit) -> Void
@@ -42,7 +43,8 @@ struct CenterPanel: View {
                         habits: habits,
                         todayKey: todayKey,
                         onToggle: onToggleHabit,
-                        onDelete: onDeleteHabit
+                        onDelete: onDeleteHabit,
+                        clusters: clusters
                     )
                     .padding(.top, 4)
                     .padding(.bottom, 60)

@@ -44,23 +44,6 @@ enum UserLevel: String {
     }
 }
 
-struct MentorCandidate: Identifiable {
-    let id = UUID()
-    let name: String
-    let focus: String
-    let timezone: String
-    let language: String
-    let consistency: Int
-}
-
-struct FeedPost: Identifiable {
-    let id = UUID()
-    let author: String
-    let message: String
-    let meta: String
-    let systemImage: String
-}
-
 struct HabitMetrics {
     let totalHabits: Int
     let totalChecks: Int
@@ -73,7 +56,6 @@ struct HabitMetrics {
     let medals: [Medal]
     let level: UserLevel
     let xp: Int
-    let coins: Int
     let weeklyConsistency: Double
     let weeklyConsistencyPercent: Int
     let nextLevelProgress: Double
@@ -81,9 +63,7 @@ struct HabitMetrics {
     let needsMentor: Bool
     let accountabilityScore: Int
     let missedToday: Int
-    let mentorCandidate: MentorCandidate
     let mentorTip: String
-    let feedPosts: [FeedPost]
     let challengeProgress: Double
     let challengeRank: Int
     let daysUntilMentor: Int
@@ -109,7 +89,6 @@ struct HabitMetrics {
             hasSevenDayHistory: hasSevenDayHistory
         )
         let xp = totalChecks * 12 + perfectDays.count * 35 + bestPerfectStreak * 20
-        let coins = totalChecks * 3 + perfectDays.count * 25
         let mentorEligible = hasSevenDayHistory && totalHabits > 0 && weeklyConsistency >= 0.82
         let needsMentor = hasSevenDayHistory && totalHabits > 0 && weeklyConsistency < 0.58
         let missedToday = max(totalHabits - doneToday, 0)
@@ -119,9 +98,7 @@ struct HabitMetrics {
         let challengeRank = max(1, 4 - min(recentPerfectDays, 3))
         let daysUntilMentor = mentorEligible ? 0 : max(0, 7 - historyDays)
         let nextLevelProgress = nextLevelProgress(for: level, weeklyConsistency: weeklyConsistency, totalChecks: totalChecks)
-        let mentorCandidate = mentorCandidate(for: habits, needsMentor: needsMentor)
         let mentorTip = mentorTip(missedToday: missedToday, progressToday: progressToday, currentPerfectStreak: currentPerfectStreak)
-        let feedPosts = feedPosts(currentPerfectStreak: currentPerfectStreak, weeklyConsistencyPercent: weeklyConsistencyPercent)
         let levelNote = levelNote(for: level, mentorEligible: mentorEligible, needsMentor: needsMentor, daysUntilMentor: daysUntilMentor)
 
         return HabitMetrics(
@@ -136,7 +113,6 @@ struct HabitMetrics {
             medals: medals,
             level: level,
             xp: xp,
-            coins: coins,
             weeklyConsistency: weeklyConsistency,
             weeklyConsistencyPercent: weeklyConsistencyPercent,
             nextLevelProgress: nextLevelProgress,
@@ -144,9 +120,7 @@ struct HabitMetrics {
             needsMentor: needsMentor,
             accountabilityScore: accountabilityScore,
             missedToday: missedToday,
-            mentorCandidate: mentorCandidate,
             mentorTip: mentorTip,
-            feedPosts: feedPosts,
             challengeProgress: challengeProgress,
             challengeRank: challengeRank,
             daysUntilMentor: daysUntilMentor,
@@ -210,17 +184,6 @@ struct HabitMetrics {
         return DateKey.recentDays(count: 7).filter { perfectSet.contains($0.key) }.count
     }
 
-    private static func mentorCandidate(for habits: [Habit], needsMentor: Bool) -> MentorCandidate {
-        let focus = habits.first?.title ?? "Daily consistency"
-        return MentorCandidate(
-            name: needsMentor ? "Maya" : "Leo",
-            focus: focus,
-            timezone: TimeZone.current.identifier.replacingOccurrences(of: "_", with: " "),
-            language: Locale.current.identifier.split(separator: "_").first.map { String($0).uppercased() } ?? "EN",
-            consistency: needsMentor ? 91 : 86
-        )
-    }
-
     private static func mentorTip(missedToday: Int, progressToday: Double, currentPerfectStreak: Int) -> String {
         if missedToday > 0 {
             return "Pick the smallest remaining habit and send your mentor a check-in after it is done."
@@ -232,14 +195,6 @@ struct HabitMetrics {
             return "Protect the streak with one low-friction habit before the day gets busy."
         }
         return "Start with one habit. Accountability works best when the next step is obvious."
-    }
-
-    private static func feedPosts(currentPerfectStreak: Int, weeklyConsistencyPercent: Int) -> [FeedPost] {
-        [
-            FeedPost(author: "Maya", message: "Finished a 7-day morning routine streak.", meta: "Friend update", systemImage: "flame"),
-            FeedPost(author: "Noor", message: "Hit 80% consistency after a rough start.", meta: "Progress update", systemImage: "chart.line.uptrend.xyaxis"),
-            FeedPost(author: "You", message: currentPerfectStreak > 0 ? "\(currentPerfectStreak)-day streak is active." : "\(weeklyConsistencyPercent)% consistency this week.", meta: "Progress update", systemImage: "chart.line.uptrend.xyaxis")
-        ]
     }
 
     private static func levelNote(for level: UserLevel, mentorEligible: Bool, needsMentor: Bool, daysUntilMentor: Int) -> String {

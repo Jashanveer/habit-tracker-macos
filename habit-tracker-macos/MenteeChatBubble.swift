@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MenteeChatBubble: View {
     let mentee: AccountabilityDashboard.MenteeSummary
-    let onSend: (String) -> Void
+    let onSend: (String) async -> Void
     let onClose: () -> Void
 
     @State private var messageText = ""
@@ -123,8 +123,10 @@ struct MenteeChatBubble: View {
         guard !text.isEmpty, !isSending else { return }
         isSending = true
         messageText = ""
-        onSend(text)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { isSending = false }
+        Task {
+            await onSend(text)
+            isSending = false
+        }
     }
 
     private var consistencyColor: Color {

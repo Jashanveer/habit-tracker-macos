@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsPanel: View {
     let metrics: HabitMetrics
     @ObservedObject var backend: HabitBackendStore
+    let habits: [Habit]
+    @ObservedObject var locationManager: LocationReminderManager
     let onSync: () -> Void
     let onFindMentor: () -> Void
 
@@ -33,13 +35,15 @@ struct SettingsPanel: View {
 
                 SocialSummaryCard(metrics: metrics, dashboard: backend.dashboard)
 
-                SocialFeedCard(posts: metrics.feedPosts, dashboard: backend.dashboard)
+                SocialFeedCard(dashboard: backend.dashboard)
 
                 FriendSuggestionsCard(dashboard: backend.dashboard) { userID in
                     Task {
                         await backend.requestFriend(userID: userID)
                     }
                 }
+
+                LocationRemindersCard(habits: habits, locationManager: locationManager)
             }
             .padding(16)
         }
@@ -62,7 +66,7 @@ struct BackendConnectionCard: View {
 
             SettingsRow(
                 systemImage: backend.errorMessage == nil ? "checkmark.icloud" : "exclamationmark.triangle",
-                title: "localhost:8080",
+                title: BackendEnvironment.displayHost,
                 value: backend.isAuthenticated ? "Connected" : "Signed out"
             )
 
@@ -193,7 +197,7 @@ struct SocialSummaryCard: View {
     }
 
     private var updateCount: Int {
-        dashboard?.social?.updates.count ?? min(metrics.feedPosts.count, 3)
+        dashboard?.social?.updates.count ?? 0
     }
 
     private var consistencyPercent: Int {
@@ -238,6 +242,7 @@ struct SocialMetric: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 58)
         .padding(9)
         .cleanShotSurface(
             shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
@@ -247,7 +252,6 @@ struct SocialMetric: View {
 }
 
 struct SocialFeedCard: View {
-    let posts: [FeedPost]
     let dashboard: AccountabilityDashboard?
 
     var body: some View {
@@ -258,10 +262,15 @@ struct SocialFeedCard: View {
                 ForEach(displayUpdates) { update in
                     SocialActivityRow(update: update)
                 }
-            } else {
+            } else if !displayPosts.isEmpty {
                 ForEach(displayPosts) { post in
                     SocialPostRow(post: post)
                 }
+            } else {
+                Text("No social updates yet. Add friends to start seeing activity.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(12)
@@ -276,19 +285,9 @@ struct SocialFeedCard: View {
         return Array(updates.prefix(4))
     }
 
-    private var displayPosts: [FeedPost] {
-        guard let remotePosts = dashboard?.feed, !remotePosts.isEmpty else {
-            return posts
-        }
-
-        return remotePosts.prefix(3).map { post in
-            FeedPost(
-                author: post.author,
-                message: post.message,
-                meta: "Community update",
-                systemImage: "quote.bubble"
-            )
-        }
+    private var displayPosts: [AccountabilityDashboard.SocialPost] {
+        guard let remotePosts = dashboard?.feed, !remotePosts.isEmpty else { return [] }
+        return Array(remotePosts.prefix(3))
     }
 }
 
@@ -322,6 +321,7 @@ struct SocialActivityRow: View {
                     .tint(tint)
             }
         }
+        .frame(minHeight: 70)
     }
 
     private var icon: String {
@@ -341,7 +341,7 @@ struct SocialActivityRow: View {
 }
 
 struct SocialPostRow: View {
-    let post: FeedPost
+    let post: AccountabilityDashboard.SocialPost
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -358,11 +358,18 @@ struct SocialPostRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                Text(post.meta)
+                Text("Community update")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.tertiary)
             }
         }
+        .frame(minHeight: 70)
+    }
+}
+
+private extension AccountabilityDashboard.SocialPost {
+    var systemImage: String {
+        "quote.bubble"
     }
 }
 
@@ -435,6 +442,7 @@ struct FriendSuggestionRow: View {
                 level: .control
             )
         }
+        .frame(minHeight: 50)
     }
 }
 
@@ -527,3 +535,155 @@ struct SettingsMetric: View {
     }
 }
 
+// MARK: - Location Reminders Card
+
+struct LocationRemindersCard: View {
+    let habits: [Habit]
+    @ObservedObject var locationManager: LocationReminderManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PanelTitle(systemImage: "location.fill", title: "Location reminders")
+
+            // Current network status
+            HStack(spacing: 8) {
+                Image(systemName: locationManager.currentContext.systemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(locationManager.currentContext == .unknown ? .secondary : CleanShotTheme.accent)
+                    .frame(width: 26, height: 26)
+                    .cleanShotSurface(shape: Circle(), level: .control)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(locationManager.currentSSID ?? "Not connected")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(locationManager.currentSSID == nil ? .secondary : .primary)
+                    Text(locationManager.currentContext == .unknown
+                         ? "No location label"
+                         : locationManager.currentContext.rawValue)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                // Label current network button
+                if let ssid = locationManager.currentSSID {
+                    Menu {
+                        ForEach(LocationContext.allCases.filter { $0 != .unknown }) { context in
+                            Button {
+                                locationManager.labelSSID(ssid, as: context)
+                            } label: {
+                                Label(context.rawValue, systemImage: context.systemImage)
+                            }
+                        }
+                    } label: {
+                        Text("Label")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                    }
+                    .buttonStyle(.plain)
+                    .cleanShotSurface(
+                        shape: RoundedRectangle(cornerRadius: 8, style: .continuous),
+                        level: .control
+                    )
+                }
+            }
+
+            // Existing SSID → context labels
+            if !locationManager.wifiLabels.isEmpty {
+                Divider()
+
+                ForEach(Array(locationManager.wifiLabels.keys.sorted()), id: \.self) { ssid in
+                    if let context = locationManager.wifiLabels[ssid] {
+                        HStack(spacing: 8) {
+                            Image(systemName: context.systemImage)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(CleanShotTheme.accent)
+                                .frame(width: 22, height: 22)
+                                .cleanShotSurface(shape: Circle(), level: .control)
+
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(ssid)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(context.rawValue)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+                                    locationManager.removeLabel(for: ssid)
+                                }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+
+            // Hint text
+            Text("Assign habits to locations below to get reminders when you arrive.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Per-habit location picker
+            if !habits.isEmpty {
+                Divider()
+
+                ForEach(habits) { habit in
+                    HabitLocationRow(habit: habit)
+                }
+            }
+        }
+        .padding(12)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
+            level: .control
+        )
+    }
+}
+
+private struct HabitLocationRow: View {
+    let habit: Habit
+    @State private var selectedContext: LocationContext = .unknown
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(habit.title)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+
+            Spacer()
+
+            Picker("", selection: $selectedContext) {
+                Text("None").tag(LocationContext.unknown)
+                ForEach(LocationContext.allCases.filter { $0 != .unknown }) { ctx in
+                    Label(ctx.rawValue, systemImage: ctx.systemImage).tag(ctx)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .font(.caption2)
+            .frame(maxWidth: 100)
+            .onChange(of: selectedContext) { _, newContext in
+                habit.locationContext = newContext == .unknown ? nil : newContext.rawValue
+            }
+        }
+        .onAppear {
+            if let raw = habit.locationContext, let ctx = LocationContext(rawValue: raw) {
+                selectedContext = ctx
+            } else {
+                selectedContext = .unknown
+            }
+        }
+    }
+}

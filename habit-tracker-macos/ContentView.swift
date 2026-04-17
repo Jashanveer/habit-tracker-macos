@@ -6,6 +6,8 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Habit.createdAt) private var habits: [Habit]
     @StateObject private var backend = HabitBackendStore()
+    @StateObject private var locationManager = LocationReminderManager()
+    private let locationNotifier = LocationReminderNotifier()
 
     @State private var newHabitTitle = ""
     @State private var progressOpen = false
@@ -24,19 +26,15 @@ struct ContentView: View {
     private var metrics: HabitMetrics { HabitMetrics.compute(for: habits, todayKey: todayKey) }
 
     private var showMentorCharacter: Bool {
-        #if DEBUG
-        return true
-        #else
         return backend.dashboard?.match != nil
-        #endif
     }
 
     private var showMenteeCharacter: Bool {
-        #if DEBUG
-        return true
-        #else
         return (backend.dashboard?.mentorDashboard.activeMenteeCount ?? 0) > 0
-        #endif
+    }
+
+    private var mentorMissedCount: Int {
+        backend.dashboard?.mentorDashboard.mentees.reduce(0) { $0 + $1.missedHabitsToday } ?? 0
     }
 
     var body: some View {
@@ -47,6 +45,7 @@ struct ContentView: View {
             newHabitTitle: $newHabitTitle,
             metrics: metrics,
             backend: backend,
+            locationManager: locationManager,
             progressOpen: $progressOpen,
             calendarOpen: $calendarOpen,
             settingsOpen: $settingsOpen,
@@ -54,12 +53,16 @@ struct ContentView: View {
             mentorNudge: $mentorNudge,
             showMentorCharacter: showMentorCharacter,
             showMenteeCharacter: showMenteeCharacter,
+            mentorMissedCount: mentorMissedCount,
             onAddHabit: addHabit,
             onToggleHabit: toggleHabit,
             onDeleteHabit: deleteHabit,
             onSync: syncWithBackend,
             onFindMentor: assignMentor
         )
+        .onChange(of: locationManager.currentContext) { _, newContext in
+            locationNotifier.contextDidChange(to: newContext, habits: habits, todayKey: todayKey)
+        }
         .animation(.smooth(duration: 0.2), value: colorScheme)
         .task {
             guard backend.isAuthenticated else { return }
@@ -117,7 +120,7 @@ struct ContentView: View {
                 try await flushOutbox()
                 let remote = try await backend.listHabits()
                 applyReconcile(SyncEngine.reconcile(local: habits, remote: remote))
-                backend.statusMessage = "Synced with localhost:8080"
+                backend.statusMessage = "Synced with \(BackendEnvironment.displayHost)"
                 backend.errorMessage  = nil
                 await backend.refreshDashboard()
             } catch {
@@ -147,8 +150,9 @@ struct ContentView: View {
             }
         }
 
-        // 2. Retry failed habits that already have a backendId (re-push all checks)
-        for habit in SyncEngine.failedUploads(in: habits) {
+        // 2. Retry failed habits with no specific pending check — re-push all done keys
+        // (Skip habits that have a pendingCheckDayKey; those are handled precisely in step 3.)
+        for habit in SyncEngine.failedUploads(in: habits) where habit.pendingCheckDayKey == nil {
             guard let bid = habit.backendId else { continue }
             do {
                 for dayKey in habit.completedDayKeys {
@@ -160,12 +164,36 @@ struct ContentView: View {
                 // Leave as .failed — the badge will invite the user to retry manually
             }
         }
+
+        // 3. Push pending check-state (toggles that weren't confirmed, including unchecks).
+        // This is the fix for: offline toggle → sync → server-wins overwrites the pending toggle.
+        // We process habits where pendingCheckDayKey is set regardless of syncStatus so that
+        // both the in-flight `.pending` case and the failed `.failed` case are retried.
+        let pendingChecks = habits.filter { $0.backendId != nil && $0.pendingCheckDayKey != nil }
+        for habit in pendingChecks {
+            guard let bid = habit.backendId, let dayKey = habit.pendingCheckDayKey else { continue }
+            let done = habit.pendingCheckIsDone
+            do {
+                try await backend.setCheck(habitID: bid, dateKey: dayKey, done: done)
+                habit.pendingCheckDayKey = nil   // confirmed — reconcile may now overwrite safely
+                habit.syncStatus = .synced
+                habit.updatedAt  = Date()
+            } catch {
+                habit.syncStatus = .failed
+                // pendingCheckDayKey stays set so the next sync can retry
+            }
+        }
     }
 
     /// Apply a `ReconcileResult` to SwiftData. Conflict policy: server-wins.
     private func applyReconcile(_ result: SyncEngine.ReconcileResult) {
         for (local, remote) in result.toUpdate {
-            // Only overwrite if the local record is synced (not a pending local edit)
+            // Never overwrite while a check toggle is pending confirmation.
+            // Once flushOutbox confirms the upload it clears pendingCheckDayKey,
+            // allowing the next reconcile pass to apply server state safely.
+            guard local.pendingCheckDayKey == nil else { continue }
+            // Also skip in-flight creates (syncStatus == .pending with no backendId is
+            // already excluded from toUpdate, but guard against future edge cases).
             guard local.syncStatus == .synced || local.syncStatus == .failed else { continue }
             local.title             = remote.title
             local.completedDayKeys  = remote.completedDayKeys
@@ -194,8 +222,14 @@ struct ContentView: View {
 
         withAnimation(.snappy(duration: 0.2)) {
             habit.completedDayKeys = keys.sorted()
-            habit.updatedAt  = Date()
-            habit.syncStatus = habit.backendId != nil ? .pending : habit.syncStatus
+            habit.updatedAt = Date()
+            if habit.backendId != nil {
+                habit.syncStatus = .pending
+                // Record the exact operation so flushOutbox can upload the right done value,
+                // including unchecks (done=false) which were previously never retried.
+                habit.pendingCheckDayKey = todayKey
+                habit.pendingCheckIsDone = wasUnchecked
+            }
         }
 
         if wasUnchecked && showMentorCharacter {
@@ -213,9 +247,11 @@ struct ContentView: View {
         Task {
             do {
                 try await backend.setCheck(habitID: backendId, dateKey: todayKey, done: wasUnchecked)
+                habit.pendingCheckDayKey = nil   // operation confirmed — safe to reconcile
                 habit.syncStatus = .synced
                 await backend.refreshDashboard()
             } catch {
+                // Keep pendingCheckDayKey set so flushOutbox can retry the exact operation
                 habit.syncStatus = .failed
                 backend.errorMessage = error.localizedDescription
             }

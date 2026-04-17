@@ -5,6 +5,8 @@ struct StatsSidebar: View {
 
     let metrics: HabitMetrics
     let dashboard: AccountabilityDashboard?
+    @ObservedObject var backend: HabitBackendStore
+    let todayKey: String
 
     private var level: Int { (dashboard?.rewards.xp ?? metrics.totalChecks) / 100 + 1 }
     private var xp: Int { (dashboard?.rewards.xp ?? metrics.totalChecks) % 100 }
@@ -13,6 +15,8 @@ struct StatsSidebar: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                ProfileIdentityCard(metrics: metrics, dashboard: dashboard)
+
                 LevelHeroCard(metrics: metrics, dashboard: dashboard)
 
                 // MARK: - Hero Streak Ring
@@ -63,8 +67,8 @@ struct StatsSidebar: View {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                     StatCard(icon: "checklist", label: "Habits", value: "\(metrics.totalHabits)", tint: CleanShotTheme.accent)
                     StatCard(icon: "checkmark.circle.fill", label: "Done", value: "\(metrics.doneToday)", tint: CleanShotTheme.success)
-                    StatCard(icon: "bitcoinsign.circle.fill", label: "Coins", value: "\(dashboard?.rewards.coins ?? metrics.coins)", tint: CleanShotTheme.gold)
                     StatCard(icon: "bolt.fill", label: "XP", value: "\(dashboard?.rewards.xp ?? metrics.xp)", tint: CleanShotTheme.violet)
+                    StatCard(icon: "shield.fill", label: "Freezes", value: "\(dashboard?.rewards.freezesAvailable ?? 0)", tint: Color.cyan)
                 }
 
                 // MARK: - Level & XP
@@ -115,6 +119,20 @@ struct StatsSidebar: View {
 
                 WeeklyChallengeCard(metrics: metrics, dashboard: dashboard)
 
+                HabitClusterSummaryCard(clusters: dashboard?.habitClusters ?? [])
+
+                // MARK: - Reward Eligibility
+                if let rewards = dashboard?.rewards {
+                    RewardEligibilityCard(rewards: rewards)
+
+                    StreakFreezeCard(
+                        rewards: rewards,
+                        todayKey: todayKey,
+                        isSyncing: backend.isSyncing,
+                        onUseFreeze: { await backend.useStreakFreeze(dateKey: todayKey) }
+                    )
+                }
+
                 // MARK: - Achievements
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Achievements")
@@ -130,6 +148,100 @@ struct StatsSidebar: View {
         }
         .scrollIndicators(.hidden)
         .sidebarSurfaceStyle()
+    }
+}
+
+struct ProfileIdentityCard: View {
+    let metrics: HabitMetrics
+    let dashboard: AccountabilityDashboard?
+
+    private var username: String {
+        if let user = dashboard?.profile.username?.trimmingCharacters(in: .whitespacesAndNewlines), !user.isEmpty {
+            return user
+        }
+        if let email = dashboard?.profile.email, let prefix = email.split(separator: "@").first, !prefix.isEmpty {
+            return String(prefix)
+        }
+        return "habit.user"
+    }
+
+    private var badgeTitle: String {
+        let levelName = dashboard?.level.name ?? metrics.level.rawValue
+        switch levelName.lowercased() {
+        case "master mentor":
+            return "Master Mentor"
+        case "mentor":
+            return "Mentor"
+        case "elite":
+            return "Elite"
+        case "consistent":
+            return "Consistent"
+        case "rising":
+            return "Rising"
+        default:
+            return "Beginner"
+        }
+    }
+
+    private var avatarURL: URL? {
+        if
+            let raw = dashboard?.profile.avatarUrl,
+            let parsed = URL(string: raw),
+            !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return parsed
+        }
+
+        let seed = username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "habit-user"
+        return URL(string: "https://api.dicebear.com/9.x/adventurer/png?seed=\(seed)&size=96")
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            AsyncImage(url: avatarURL) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+            } placeholder: {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(CleanShotTheme.accent)
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(username)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                BadgeChip(title: badgeTitle)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
+    }
+}
+
+private struct BadgeChip: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(CleanShotTheme.gold)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(CleanShotTheme.gold.opacity(0.14), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(CleanShotTheme.gold.opacity(0.35), lineWidth: 0.8)
+            )
     }
 }
 
@@ -209,12 +321,14 @@ struct WeeklyChallengeCard: View {
             ProgressView(value: challengeProgress)
                 .tint(CleanShotTheme.accent)
 
-            HStack {
-                ForEach(displayLeaders) { leader in
-                    ChallengeLeader(
-                        name: leader.displayName,
-                        score: "\(leader.score)/\(dashboard?.weeklyChallenge.targetPerfectDays ?? 5)"
-                    )
+            if !displayLeaders.isEmpty {
+                HStack {
+                    ForEach(displayLeaders) { leader in
+                        ChallengeLeader(
+                            name: leader.displayName,
+                            score: "\(leader.score)/\(dashboard?.weeklyChallenge.targetPerfectDays ?? 5)"
+                        )
+                    }
                 }
             }
         }
@@ -238,11 +352,7 @@ struct WeeklyChallengeCard: View {
             return Array(leaderboard.prefix(3))
         }
 
-        return [
-            AccountabilityDashboard.LeaderboardEntry(displayName: "Maya", score: 5, currentUser: false),
-            AccountabilityDashboard.LeaderboardEntry(displayName: "You", score: metrics.perfectDaysCount, currentUser: true),
-            AccountabilityDashboard.LeaderboardEntry(displayName: "Leo", score: 3, currentUser: false)
-        ]
+        return []
     }
 }
 
@@ -254,11 +364,14 @@ struct ChallengeLeader: View {
         VStack(spacing: 3) {
             Text(name)
                 .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
             Text(score)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+        .frame(minHeight: 38)
         .padding(.vertical, 7)
         .cleanShotSurface(
             shape: RoundedRectangle(cornerRadius: 9, style: .continuous),
@@ -291,6 +404,7 @@ struct StreakPill: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 64)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .cleanShotSurface(
@@ -326,6 +440,7 @@ struct StatCard: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
+        .frame(minHeight: 118)
         .padding(.vertical, 14)
         .cleanShotSurface(
             shape: RoundedRectangle(cornerRadius: 20, style: .continuous),
@@ -338,6 +453,97 @@ struct StatCard: View {
     }
 }
 
+
+// MARK: - RewardEligibilityCard
+
+/// Shows today's reward progress — XP cap status and a clear
+/// "cap reached" warning so users understand why additional checks earn 0 XP.
+struct RewardEligibilityCard: View {
+    let rewards: AccountabilityDashboard.Rewards
+
+    private var capFraction: Double {
+        guard rewards.dailyCap > 0 else { return 1 }
+        return min(Double(rewards.checksToday) / Double(rewards.dailyCap), 1)
+    }
+
+    private var barColor: Color {
+        rewards.rewardEligible ? CleanShotTheme.violet : CleanShotTheme.warning
+    }
+
+    private var statusText: String {
+        if rewards.rewardEligible {
+            let remaining = rewards.dailyCap - rewards.checksToday
+            return "\(remaining) reward-eligible check\(remaining == 1 ? "" : "s") left today"
+        }
+        return "Daily XP cap reached — habits still track"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                PanelTitle(systemImage: "star.circle.fill", title: "Reward eligibility")
+                Spacer()
+                if !rewards.rewardEligible {
+                    Text("CAP REACHED")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(CleanShotTheme.warning)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(CleanShotTheme.warning.opacity(0.14), in: Capsule())
+                }
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(barColor.opacity(0.15))
+
+                    Capsule()
+                        .fill(barColor)
+                        .frame(width: max(geo.size.width * capFraction, rewards.checksToday > 0 ? 6 : 0))
+                        .animation(.spring(response: 0.6, dampingFraction: 0.78), value: capFraction)
+                }
+            }
+            .frame(height: 8)
+
+            HStack {
+                Label("\(rewards.checksToday)/\(rewards.dailyCap) today", systemImage: "bolt.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(barColor)
+
+                Spacer()
+
+                Text(statusText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            if rewards.badges.count > 0 {
+                Divider()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(rewards.badges, id: \.self) { badge in
+                            Text(badge)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(CleanShotTheme.gold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(CleanShotTheme.gold.opacity(0.12), in: Capsule())
+                                .overlay(Capsule().stroke(CleanShotTheme.gold.opacity(0.3), lineWidth: 0.8))
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+            }
+        }
+        .padding(14)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
+    }
+}
 
 struct AchievementRow: View {
     let medal: Medal
@@ -366,11 +572,196 @@ struct AchievementRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .frame(minHeight: 58)
         .cleanShotSurface(
             shape: RoundedRectangle(cornerRadius: 16, style: .continuous),
             level: .control,
             isActive: medal.unlocked
         )
         .opacity(medal.unlocked ? 1.0 : 0.65)
+    }
+}
+
+// MARK: - StreakFreezeCard
+
+private struct StreakFreezeCard: View {
+    let rewards: AccountabilityDashboard.Rewards
+    let todayKey: String
+    let isSyncing: Bool
+    let onUseFreeze: () async -> Void
+
+    private var alreadyFrozenToday: Bool { rewards.frozenDates.contains(todayKey) }
+    private var canUse: Bool { rewards.freezesAvailable > 0 && !alreadyFrozenToday }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PanelTitle(systemImage: "shield.fill", title: "Streak freeze")
+
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.cyan.opacity(0.14))
+                    Image(systemName: "snowflake")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.cyan)
+                }
+                .frame(width: 48, height: 48)
+                .animation(.spring(response: 0.4, dampingFraction: 0.65), value: rewards.freezesAvailable)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(rewards.freezesAvailable)")
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .contentTransition(.numericText())
+                            .animation(.spring(response: 0.45, dampingFraction: 0.7), value: rewards.freezesAvailable)
+                        Text(rewards.freezesAvailable == 1 ? "token" : "tokens")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("earned from perfect weeks")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            if !rewards.frozenDates.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Protected days")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(rewards.frozenDates.suffix(3), id: \.self) { date in
+                        HStack(spacing: 6) {
+                            Image(systemName: "snowflake")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color.cyan)
+                            Text(date)
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            if canUse || alreadyFrozenToday {
+                Button {
+                    Task { await onUseFreeze() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: alreadyFrozenToday ? "checkmark.shield.fill" : "shield.fill")
+                        Text(alreadyFrozenToday ? "Today is frozen" : "Use today")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .background(
+                        alreadyFrozenToday
+                            ? Color.cyan.opacity(0.18)
+                            : Color.cyan.opacity(0.82),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .foregroundStyle(alreadyFrozenToday ? Color.cyan : .white)
+                }
+                .buttonStyle(.plain)
+                .disabled(alreadyFrozenToday || isSyncing)
+                .animation(.spring(response: 0.3, dampingFraction: 0.75), value: alreadyFrozenToday)
+            }
+        }
+        .padding(14)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
+    }
+}
+
+// MARK: - HabitClusterBadge
+
+struct HabitClusterBadge: View {
+    let timeSlot: String
+
+    private var icon: String? {
+        switch timeSlot.uppercased() {
+        case "MORNING":   return "sunrise.fill"
+        case "AFTERNOON": return "sun.max.fill"
+        case "EVENING":   return "sunset.fill"
+        case "NIGHT":     return "moon.stars.fill"
+        case "MIXED":     return "clock.arrow.2.circlepath"
+        default:          return nil
+        }
+    }
+
+    private var tint: Color {
+        switch timeSlot.uppercased() {
+        case "MORNING":   return .yellow
+        case "AFTERNOON": return .orange
+        case "EVENING":   return .orange
+        case "NIGHT":     return Color.indigo
+        case "MIXED":     return Color.secondary
+        default:          return Color.secondary
+        }
+    }
+
+    private var label: String {
+        timeSlot.prefix(1).uppercased() + timeSlot.dropFirst().lowercased()
+    }
+
+    var body: some View {
+        if let icon {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.14), in: Capsule())
+            .overlay(Capsule().stroke(tint.opacity(0.3), lineWidth: 0.6))
+        }
+    }
+}
+
+// MARK: - HabitClusterSummaryCard
+
+private struct HabitClusterSummaryCard: View {
+    let clusters: [AccountabilityDashboard.HabitTimeCluster]
+
+    private var qualifiedClusters: [AccountabilityDashboard.HabitTimeCluster] {
+        clusters.filter { $0.sampleSize >= 3 && $0.timeSlot.uppercased() != "UNKNOWN" }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PanelTitle(systemImage: "clock.fill", title: "Your habit rhythm")
+
+            if qualifiedClusters.count < 2 {
+                Text("Complete habits for 3+ days to reveal your patterns")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(qualifiedClusters.prefix(4)) { cluster in
+                        HStack(spacing: 8) {
+                            HabitClusterBadge(timeSlot: cluster.timeSlot)
+
+                            Text(cluster.habitTitle)
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
+
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
     }
 }

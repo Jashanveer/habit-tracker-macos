@@ -63,9 +63,14 @@ struct HabitListSection: View {
     let todayKey: String
     let onToggle: (Habit) -> Void
     let onDelete: (Habit) -> Void
+    var clusters: [AccountabilityDashboard.HabitTimeCluster] = []
 
     private var doneCount: Int {
         habits.filter { $0.completedDayKeys.contains(todayKey) }.count
+    }
+
+    private func cluster(for habit: Habit) -> AccountabilityDashboard.HabitTimeCluster? {
+        clusters.first { $0.habitTitle == habit.title }
     }
 
     var body: some View {
@@ -87,7 +92,8 @@ struct HabitListSection: View {
                         habit: habit,
                         todayKey: todayKey,
                         onToggle: onToggle,
-                        onDelete: onDelete
+                        onDelete: onDelete,
+                        cluster: cluster(for: habit)
                     )
                 }
             }
@@ -158,6 +164,7 @@ struct HabitCard: View {
     let todayKey: String
     let onToggle: (Habit) -> Void
     let onDelete: (Habit) -> Void
+    var cluster: AccountabilityDashboard.HabitTimeCluster? = nil
 
     @State private var isHovered = false
     @State private var deleteHovered = false
@@ -182,11 +189,16 @@ struct HabitCard: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(habit.title)
-                    .font(.system(size: 14, weight: .medium))
-                    .strikethrough(doneToday)
-                    .foregroundStyle(doneToday ? .secondary : .primary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(habit.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .strikethrough(doneToday)
+                        .foregroundStyle(doneToday ? .secondary : .primary)
+                        .lineLimit(1)
+                    if let cluster, cluster.sampleSize >= 3 {
+                        HabitClusterBadge(timeSlot: cluster.timeSlot)
+                    }
+                }
 
                 HStack(spacing: 8) {
                     if currentStreak > 0 {

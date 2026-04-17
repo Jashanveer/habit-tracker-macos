@@ -119,6 +119,9 @@ struct AuthGateView: View {
     @State private var username = ""
     @State private var email = ""
     @State private var password = ""
+    @State private var verificationCode = ""
+    @State private var isVerificationCodeSent = false
+    @State private var successMessage: String?
     @State private var selectedAvatarID = AvatarChoice.options[0].id
     @State private var validationMessage: String?
 
@@ -167,6 +170,11 @@ struct AuthGateView: View {
                             .padding(.horizontal, 14)
                             .frame(height: 44)
                             .cleanShotSurface(shape: Capsule(), level: .control)
+                            .onChange(of: email) { _, _ in
+                                isVerificationCodeSent = false
+                                verificationCode = ""
+                                successMessage = nil
+                            }
                             .onSubmit {
                                 submit()
                             }
@@ -182,6 +190,19 @@ struct AuthGateView: View {
                         .onSubmit {
                             submit()
                         }
+
+                    if mode == .signUp && isVerificationCodeSent {
+                        TextField("6-digit verification code", text: $verificationCode)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 14))
+                            .padding(.horizontal, 14)
+                            .frame(height: 44)
+                            .cleanShotSurface(shape: Capsule(), level: .control)
+                            .onSubmit {
+                                submit()
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
 
                     if mode == .signUp {
                         VStack(alignment: .leading, spacing: 8) {
@@ -212,6 +233,24 @@ struct AuthGateView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
+                    if let successMessage {
+                        Text(successMessage)
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if mode == .signUp && isVerificationCodeSent {
+                        Button("Resend code") {
+                            resendVerificationCode()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .disabled(backend.isSyncing)
+                    }
+
                     HStack(spacing: 10) {
                         Button {
                             submit()
@@ -222,7 +261,7 @@ struct AuthGateView: View {
                                         .controlSize(.small)
                                         .tint(.white)
                                 }
-                                Text(mode.primaryActionTitle)
+                                Text(primaryActionTitle)
                                     .font(.subheadline.weight(.semibold))
                             }
                             .frame(maxWidth: .infinity)
@@ -269,9 +308,9 @@ struct AuthGateView: View {
         var subtitle: String {
             switch self {
             case .signIn:
-                return "Use your username to sync with localhost:8080."
+                return "Use your username to sync with \(BackendEnvironment.displayHost)."
             case .signUp:
-                return "Pick a username and a character for your habit profile."
+                return "Verify your email before your account is created."
             }
         }
 
@@ -298,10 +337,18 @@ struct AuthGateView: View {
         AvatarChoice.options.first { $0.id == selectedAvatarID } ?? AvatarChoice.options[0]
     }
 
+    private var primaryActionTitle: String {
+        if mode == .signUp && !isVerificationCodeSent {
+            return "Send verification code"
+        }
+        return mode.primaryActionTitle
+    }
+
     private func switchMode(_ nextMode: AuthMode) {
         withAnimation(.smooth(duration: 0.2)) {
             mode = nextMode
             validationMessage = nil
+            successMessage = nil
             backend.errorMessage = nil
         }
     }
@@ -309,7 +356,9 @@ struct AuthGateView: View {
     private func submit() {
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedVerificationCode = verificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
         validationMessage = nil
+        successMessage = nil
         backend.errorMessage = nil
 
         guard isValidUsername(trimmedUsername) else {
@@ -327,16 +376,31 @@ struct AuthGateView: View {
             return
         }
 
+        if mode == .signUp && isVerificationCodeSent && !isValidVerificationCode(trimmedVerificationCode) {
+            validationMessage = "Enter the 6-digit verification code from your email."
+            return
+        }
+
         Task {
             switch mode {
             case .signIn:
                 await backend.signIn(username: trimmedUsername, password: password)
             case .signUp:
+                if !isVerificationCodeSent {
+                    await backend.requestEmailVerification(email: trimmedEmail)
+                    if backend.errorMessage == nil {
+                        isVerificationCodeSent = true
+                        successMessage = "Check \(trimmedEmail) for your verification code."
+                    }
+                    return
+                }
+
                 await backend.register(
                     username: trimmedUsername,
                     email: trimmedEmail,
                     password: password,
-                    avatarURL: selectedAvatar.url
+                    avatarURL: selectedAvatar.url,
+                    verificationCode: trimmedVerificationCode
                 )
             }
 
@@ -346,9 +410,33 @@ struct AuthGateView: View {
         }
     }
 
+    private func resendVerificationCode() {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        validationMessage = nil
+        successMessage = nil
+        backend.errorMessage = nil
+
+        guard trimmedEmail.contains("@") else {
+            validationMessage = "Enter a valid email address."
+            return
+        }
+
+        Task {
+            await backend.requestEmailVerification(email: trimmedEmail)
+            if backend.errorMessage == nil {
+                verificationCode = ""
+                successMessage = "A new code was sent to \(trimmedEmail)."
+            }
+        }
+    }
+
     private func isValidUsername(_ value: String) -> Bool {
         guard (3...30).contains(value.count) else { return false }
         return value.range(of: "^[A-Za-z0-9_]+$", options: .regularExpression) != nil
+    }
+
+    private func isValidVerificationCode(_ value: String) -> Bool {
+        value.range(of: "^\\d{6}$", options: .regularExpression) != nil
     }
 }
 
@@ -477,7 +565,6 @@ struct ConnectionStatusPill: View {
             return "Syncing..."
         }
 
-        return backend.isAuthenticated ? (backend.statusMessage ?? "Connected to localhost:8080") : "Backend sign in required"
+        return backend.isAuthenticated ? (backend.statusMessage ?? "Connected to \(BackendEnvironment.displayHost)") : "Backend sign in required"
     }
 }
-

@@ -57,9 +57,9 @@ struct MentorChatBubble: View {
                     .padding(10)
                 }
                 .onChange(of: messages.count) { _, _ in
-                    if let last = messages.last {
+                    if let newest = messages.first {
                         withAnimation {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+                            proxy.scrollTo(newest.id, anchor: .top)
                         }
                     }
                 }

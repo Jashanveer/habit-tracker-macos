@@ -7,6 +7,7 @@ struct ContentViewScaffold: View {
     @Binding var newHabitTitle: String
     let metrics: HabitMetrics
     @ObservedObject var backend: HabitBackendStore
+    @ObservedObject var locationManager: LocationReminderManager
 
     @Binding var progressOpen: Bool
     @Binding var calendarOpen: Bool
@@ -16,6 +17,7 @@ struct ContentViewScaffold: View {
     @Binding var mentorNudge: String?
     let showMentorCharacter: Bool
     let showMenteeCharacter: Bool
+    let mentorMissedCount: Int
 
     let onAddHabit: () -> Void
     let onToggleHabit: (Habit) -> Void
@@ -33,6 +35,7 @@ struct ContentViewScaffold: View {
                 todayKey: todayKey,
                 newHabitTitle: $newHabitTitle,
                 metrics: metrics,
+                clusters: backend.dashboard?.habitClusters ?? [],
                 onAddHabit: onAddHabit,
                 onToggleHabit: onToggleHabit,
                 onDeleteHabit: onDeleteHabit
@@ -57,7 +60,7 @@ struct ContentViewScaffold: View {
 
                 HStack {
                     Spacer()
-                    StatsSidebar(metrics: metrics, dashboard: backend.dashboard)
+                    StatsSidebar(metrics: metrics, dashboard: backend.dashboard, backend: backend, todayKey: todayKey)
                         .frame(width: 330)
                         .padding(.trailing, 22)
                         .padding(.vertical, 22)
@@ -82,6 +85,8 @@ struct ContentViewScaffold: View {
                     SettingsPanel(
                         metrics: metrics,
                         backend: backend,
+                        habits: habits,
+                        locationManager: locationManager,
                         onSync: onSync,
                         onFindMentor: onFindMentor
                     )
@@ -178,9 +183,10 @@ struct ContentViewScaffold: View {
                     .zIndex(100)
             }
         }
-        .overlay(alignment: .top) {
+        .overlay(alignment: .topTrailing) {
             ConnectionStatusPill(backend: backend, onSync: onSync)
                 .padding(.top, 12)
+                .padding(.trailing, 16)
         }
         .overlay {
             if !backend.isAuthenticated {
@@ -199,8 +205,23 @@ struct ContentViewScaffold: View {
         }
         .overlay(alignment: .bottom) {
             if showMenteeCharacter && backend.isAuthenticated {
-                MenteeCharacterView(backend: backend)
+                MenteeCharacterView(backend: backend, mentorMissedCount: mentorMissedCount)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if showMenteeCharacter && backend.isAuthenticated && mentorMissedCount > 0 {
+                MentorAlertBanner(
+                    missedCount: mentorMissedCount,
+                    mentees: backend.dashboard?.mentorDashboard.mentees ?? [],
+                    onNudge: { matchId in
+                        Task { await backend.sendNudge(matchId: matchId) }
+                    }
+                )
+                .padding(.leading, 20)
+                .padding(.bottom, 148)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: mentorMissedCount)
             }
         }
         .frame(minWidth: 900, minHeight: 600)
