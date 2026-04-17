@@ -242,6 +242,15 @@ actor BackendAPIClient {
         let s = BackendSession.fromAuthTokens(tokens); session = s; return s
     }
 
+    /// Invalidates the refresh token server-side. Best-effort — never throws.
+    func logout() async {
+        guard let rt = session?.refreshToken, !rt.isEmpty else { return }
+        _ = try? await request(
+            path: "/api/auth/logout", method: "POST",
+            body: LogoutRequest(refreshToken: rt)
+        ) as EmptyResponse
+    }
+
     // MARK: Authorized requests (with retry for network errors)
 
     func authorizedRequest<Response: Decodable>(path: String, method: String) async throws -> Response {
@@ -383,6 +392,7 @@ actor BackendAPIClient {
     private struct EmailVerificationRequest: Encodable { let email: String }
     private struct RegisterRequest: Encodable { let username, email, password, avatarUrl, verificationCode: String }
     private struct RefreshRequest:  Encodable { let refreshToken: String }
+    private struct LogoutRequest:   Encodable { let refreshToken: String }
     private struct MessageResponse: Decodable { let message: String }
     private struct ApiErrorResponse: Decodable { let message: String }
     private struct EmptyResponse: Decodable {}

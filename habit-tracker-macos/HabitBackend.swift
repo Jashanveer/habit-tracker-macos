@@ -281,7 +281,10 @@ final class HabitBackendStore: ObservableObject {
     func signOut() {
         stopStream()
         clearSession()
-        Task { await apiClient.clearSession() }
+        Task {
+            await apiClient.logout()     // invalidate refresh token server-side
+            await apiClient.clearSession()
+        }
     }
 
     // MARK: - Habits (cache-aware)
