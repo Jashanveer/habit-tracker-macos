@@ -131,6 +131,7 @@ struct ContentView: View {
         let localHabit = Habit(title: title, entryType: entryType, syncStatus: .pending)
         withAnimation { modelContext.insert(localHabit) }
         newHabitTitle = ""
+        saveAndRefreshWidgets()
 
         Task {
             do {
@@ -150,10 +151,12 @@ struct ContentView: View {
                 localHabit.updatedAt  = Date()
                 backend.statusMessage = "\(entryType.title) synced"
                 backend.errorMessage  = nil
+                saveAndRefreshWidgets()
                 await backend.refreshDashboard()
             } catch {
                 localHabit.syncStatus = .failed
                 backend.errorMessage  = error.localizedDescription
+                saveAndRefreshWidgets()
             }
             refreshTimeReminders()
         }
@@ -173,6 +176,7 @@ struct ContentView: View {
                 let remoteTasks = try await tasksResponse
                 let remote = remoteHabits + remoteTasks
                 applyReconcile(SyncEngine.reconcile(local: habits, remote: remote))
+                saveAndRefreshWidgets()
                 backend.statusMessage = "Synced with \(BackendEnvironment.displayHost)"
                 backend.errorMessage  = nil
                 await backend.refreshDashboard()
@@ -351,6 +355,7 @@ struct ContentView: View {
                 habit.pendingCheckIsDone = wasUnchecked
             }
         }
+        saveAndRefreshWidgets()
 
         if wasUnchecked {
             Task { @MainActor in
@@ -389,11 +394,13 @@ struct ContentView: View {
                 }
                 habit.pendingCheckDayKey = nil   // operation confirmed — safe to reconcile
                 habit.syncStatus = .synced
+                saveAndRefreshWidgets()
                 await backend.refreshDashboard()
             } catch {
                 // Keep pendingCheckDayKey set so flushOutbox can retry the exact operation
                 habit.syncStatus = .failed
                 backend.errorMessage = error.localizedDescription
+                saveAndRefreshWidgets()
             }
             refreshTimeReminders()
         }
@@ -412,6 +419,7 @@ struct ContentView: View {
             habit.isArchived = true
             habit.updatedAt = Date()
         }
+        saveAndRefreshWidgets()
 
         guard let backendId, backend.isAuthenticated else { return }
         Task {
@@ -427,6 +435,7 @@ struct ContentView: View {
             } catch {
                 backend.errorMessage = error.localizedDescription
             }
+            saveAndRefreshWidgets()
         }
     }
 
@@ -435,6 +444,7 @@ struct ContentView: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
             modelContext.delete(task)
         }
+        saveAndRefreshWidgets()
 
         guard let backendId, backend.isAuthenticated else {
             refreshTimeReminders()
@@ -448,6 +458,7 @@ struct ContentView: View {
             } catch {
                 backend.errorMessage = error.localizedDescription
             }
+            saveAndRefreshWidgets()
             refreshTimeReminders()
         }
     }
@@ -462,6 +473,7 @@ struct ContentView: View {
                 habit.syncStatus = .pending
             }
         }
+        saveAndRefreshWidgets()
 
         refreshTimeReminders()
 
@@ -477,10 +489,12 @@ struct ContentView: View {
                 habit.reminderWindow = remote.reminderWindow
                 habit.syncStatus = .synced
                 habit.updatedAt = Date()
+                saveAndRefreshWidgets()
                 refreshTimeReminders()
             } catch {
                 habit.syncStatus = .failed
                 backend.errorMessage = error.localizedDescription
+                saveAndRefreshWidgets()
                 refreshTimeReminders()
             }
         }
@@ -497,6 +511,7 @@ struct ContentView: View {
         }
         UserDefaults.standard.set(true, forKey: onboardingKey)
         hasCompletedOnboarding = true
+        saveAndRefreshWidgets()
         refreshTimeReminders()
         if !habitTitles.isEmpty { syncWithBackend() }
     }
@@ -519,6 +534,15 @@ struct ContentView: View {
             for: habits.filter { $0.entryType == .habit },
             todayKey: todayKey
         )
+    }
+
+    private func saveAndRefreshWidgets() {
+        do {
+            try modelContext.save()
+        } catch {
+            backend.errorMessage = error.localizedDescription
+        }
+        WidgetSnapshotWriter.shared.refresh()
     }
 }
 

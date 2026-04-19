@@ -721,6 +721,7 @@ final class HabitBackendStore: ObservableObject {
 
     private func applyDashboardUpdate(_ value: AccountabilityDashboard) {
         dashboard = value
+        WidgetSnapshotWriter.shared.updateBackendData(value)
         if let matchID = value.match?.id {
             liveMessagesByMatch[matchID] = value.menteeDashboard.messages
             startStream(for: matchID)
@@ -874,6 +875,7 @@ final class HabitBackendStore: ObservableObject {
     private func clearSession(errorMessage: String? = nil) {
         stopStream()
         token = nil; dashboard = nil; liveMessagesByMatch = [:]
+        WidgetSnapshotWriter.shared.clearBackendData()
         friendSearchResults = []
         lastSentMessageAt = nil; lastSentMessageText = nil
         statusMessage = nil; self.errorMessage = errorMessage

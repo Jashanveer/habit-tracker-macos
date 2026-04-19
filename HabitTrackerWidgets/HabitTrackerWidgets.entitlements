@@ -4,17 +4,9 @@
 <dict>
     <key>com.apple.security.app-sandbox</key>
     <true/>
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.files.user-selected.read-only</key>
-    <true/>
     <key>com.apple.security.application-groups</key>
     <array>
         <string>group.jashanveer.habit-tracker-macos</string>
     </array>
-    <!-- APNs: add this back when using a paid Apple Developer account
-    <key>com.apple.developer.aps-environment</key>
-    <string>development</string>
-    -->
 </dict>
 </plist>

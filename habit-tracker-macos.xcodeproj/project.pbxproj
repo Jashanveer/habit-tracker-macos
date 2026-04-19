@@ -6,7 +6,21 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		217074364E5B7A8F26799235 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BA2258DC3FD83B9BA649C1D7 /* WidgetKit.framework */; };
+		944AB57390090127A4CAF17E /* HabitTrackerWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = C1DA33907F824AA520B8E3E6 /* HabitTrackerWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FA112B4AA34979A6793FF969 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BA2258DC3FD83B9BA649C1D7 /* WidgetKit.framework */; };
+		FC69D715931379676998B8A7 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EAFAFB09EE3A870B45A5981A /* Cocoa.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		272604538D17D46C28F58E71 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9BA6DAF42F8F3C8E009AA3BC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F154B69396161217305A3106;
+			remoteInfo = HabitTrackerWidgets;
+		};
 		9BA6DB0C2F8F3C90009AA3BC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 9BA6DAF42F8F3C8E009AA3BC /* Project object */;
@@ -23,13 +37,53 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		536FF4A05F95E366523FC57D /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				944AB57390090127A4CAF17E /* HabitTrackerWidgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		9BA6DAFC2F8F3C8E009AA3BC /* habit-tracker-macos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "habit-tracker-macos.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BA6DB0B2F8F3C90009AA3BC /* habit-tracker-macosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "habit-tracker-macosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9BA6DB152F8F3C90009AA3BC /* habit-tracker-macosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "habit-tracker-macosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		BA2258DC3FD83B9BA649C1D7 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		C1DA33907F824AA520B8E3E6 /* HabitTrackerWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HabitTrackerWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EAFAFB09EE3A870B45A5981A /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		13A215B0F827262B522440C4 /* Exceptions for "HabitTrackerWidgets" folder in "HabitTrackerWidgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F154B69396161217305A3106 /* HabitTrackerWidgets */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		1EE480870898A6B223A22E79 /* HabitTrackerWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				13A215B0F827262B522440C4 /* Exceptions for "HabitTrackerWidgets" folder in "HabitTrackerWidgets" target */,
+			);
+			path = HabitTrackerWidgets;
+			sourceTree = "<group>";
+		};
+		721684DBC3B6D1921098EDDD /* HabitTrackerShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = HabitTrackerShared;
+			sourceTree = "<group>";
+		};
 		9BA6DAFE2F8F3C8E009AA3BC /* habit-tracker-macos */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "habit-tracker-macos";
@@ -52,6 +106,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				217074364E5B7A8F26799235 /* WidgetKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -69,12 +124,31 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C1A6C0994AFCEECD30349E4C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FC69D715931379676998B8A7 /* Cocoa.framework in Frameworks */,
+				FA112B4AA34979A6793FF969 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		8331E60E918128335B6FB36B /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				EAFAFB09EE3A870B45A5981A /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
 		9B8AC25D2F907E3A00CFB6AD /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				8331E60E918128335B6FB36B /* OS X */,
+				BA2258DC3FD83B9BA649C1D7 /* WidgetKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -87,6 +161,8 @@
 				9BA6DB182F8F3C90009AA3BC /* habit-tracker-macosUITests */,
 				9B8AC25D2F907E3A00CFB6AD /* Frameworks */,
 				9BA6DAFD2F8F3C8E009AA3BC /* Products */,
+				721684DBC3B6D1921098EDDD /* HabitTrackerShared */,
+				1EE480870898A6B223A22E79 /* HabitTrackerWidgets */,
 			);
 			sourceTree = "<group>";
 		};
@@ -96,6 +172,7 @@
 				9BA6DAFC2F8F3C8E009AA3BC /* habit-tracker-macos.app */,
 				9BA6DB0B2F8F3C90009AA3BC /* habit-tracker-macosTests.xctest */,
 				9BA6DB152F8F3C90009AA3BC /* habit-tracker-macosUITests.xctest */,
+				C1DA33907F824AA520B8E3E6 /* HabitTrackerWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -110,17 +187,18 @@
 				9BA6DAF82F8F3C8E009AA3BC /* Sources */,
 				9BA6DAF92F8F3C8E009AA3BC /* Frameworks */,
 				9BA6DAFA2F8F3C8E009AA3BC /* Resources */,
+				536FF4A05F95E366523FC57D /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				597966E2F1E90C04BB45797F /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				721684DBC3B6D1921098EDDD /* HabitTrackerShared */,
 				9BA6DAFE2F8F3C8E009AA3BC /* habit-tracker-macos */,
 			);
 			name = "habit-tracker-macos";
-			packageProductDependencies = (
-			);
 			productName = "habit-tracker-macos";
 			productReference = 9BA6DAFC2F8F3C8E009AA3BC /* habit-tracker-macos.app */;
 			productType = "com.apple.product-type.application";
@@ -142,8 +220,6 @@
 				9BA6DB0E2F8F3C90009AA3BC /* habit-tracker-macosTests */,
 			);
 			name = "habit-tracker-macosTests";
-			packageProductDependencies = (
-			);
 			productName = "habit-tracker-macosTests";
 			productReference = 9BA6DB0B2F8F3C90009AA3BC /* habit-tracker-macosTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -165,11 +241,30 @@
 				9BA6DB182F8F3C90009AA3BC /* habit-tracker-macosUITests */,
 			);
 			name = "habit-tracker-macosUITests";
-			packageProductDependencies = (
-			);
 			productName = "habit-tracker-macosUITests";
 			productReference = 9BA6DB152F8F3C90009AA3BC /* habit-tracker-macosUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		F154B69396161217305A3106 /* HabitTrackerWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 18851B6067F49ACEBA70084E /* Build configuration list for PBXNativeTarget "HabitTrackerWidgets" */;
+			buildPhases = (
+				26D09A9C09358DD90DAF59C3 /* Sources */,
+				C1A6C0994AFCEECD30349E4C /* Frameworks */,
+				E7D84180363837E39D034786 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1EE480870898A6B223A22E79 /* HabitTrackerWidgets */,
+				721684DBC3B6D1921098EDDD /* HabitTrackerShared */,
+			);
+			name = HabitTrackerWidgets;
+			productName = HabitTrackerWidgets;
+			productReference = C1DA33907F824AA520B8E3E6 /* HabitTrackerWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -192,6 +287,11 @@
 						CreatedOnToolsVersion = 26.4;
 						TestTargetID = 9BA6DAFB2F8F3C8E009AA3BC;
 					};
+					F154B69396161217305A3106 = {
+						CreatedOnToolsVersion = 26.4;
+						DevelopmentTeam = YLN8JUVVX3;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = 9BA6DAF72F8F3C8E009AA3BC /* Build configuration list for PBXProject "habit-tracker-macos" */;
@@ -203,8 +303,6 @@
 			);
 			mainGroup = 9BA6DAF32F8F3C8E009AA3BC;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (
-			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9BA6DAFD2F8F3C8E009AA3BC /* Products */;
 			projectDirPath = "";
@@ -213,6 +311,7 @@
 				9BA6DAFB2F8F3C8E009AA3BC /* habit-tracker-macos */,
 				9BA6DB0A2F8F3C90009AA3BC /* habit-tracker-macosTests */,
 				9BA6DB142F8F3C90009AA3BC /* habit-tracker-macosUITests */,
+				F154B69396161217305A3106 /* HabitTrackerWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -239,9 +338,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E7D84180363837E39D034786 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		26D09A9C09358DD90DAF59C3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9BA6DAF82F8F3C8E009AA3BC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -266,6 +379,12 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		597966E2F1E90C04BB45797F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = HabitTrackerWidgets;
+			target = F154B69396161217305A3106 /* HabitTrackerWidgets */;
+			targetProxy = 272604538D17D46C28F58E71 /* PBXContainerItemProxy */;
+		};
 		9BA6DB0D2F8F3C90009AA3BC /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9BA6DAFB2F8F3C8E009AA3BC /* habit-tracker-macos */;
@@ -279,6 +398,36 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		4474C8594DBE371D3042FB01 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = HabitTrackerWidgets/HabitTrackerWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = YLN8JUVVX3;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HabitTrackerWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Habit Tracker Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.3;
+				PRODUCT_BUNDLE_IDENTIFIER = "jashanveer.habit-tracker-macos.HabitTrackerWidgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 		9BA6DB1D2F8F3C90009AA3BC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -589,9 +738,48 @@
 			};
 			name = Release;
 		};
+		DE280EAEA2CA13928DBC3B4D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = HabitTrackerWidgets/HabitTrackerWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = YLN8JUVVX3;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HabitTrackerWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Habit Tracker Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026. All rights reserved.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.3;
+				PRODUCT_BUNDLE_IDENTIFIER = "jashanveer.habit-tracker-macos.HabitTrackerWidgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		18851B6067F49ACEBA70084E /* Build configuration list for PBXNativeTarget "HabitTrackerWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DE280EAEA2CA13928DBC3B4D /* Release */,
+				4474C8594DBE371D3042FB01 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		9BA6DAF72F8F3C8E009AA3BC /* Build configuration list for PBXProject "habit-tracker-macos" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -36,6 +36,7 @@ struct HabitTrackerMacosApp: App {
         WindowGroup {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
+                .task { WidgetSnapshotWriter.shared.start(container: sharedModelContainer) }
         }
         .modelContainer(sharedModelContainer)
         .defaultSize(width: 1080, height: 720)
