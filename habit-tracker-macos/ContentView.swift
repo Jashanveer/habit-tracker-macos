@@ -315,6 +315,9 @@ struct ContentView: View {
             local.title             = remote.title
             local.reminderWindow    = remote.reminderWindow
             local.entryType         = remote.entryType
+            if remote.localCreatedAt < local.createdAt {
+                local.createdAt = remote.localCreatedAt
+            }
             local.completedDayKeys  = remote.completedDayKeys
             local.syncStatus        = .synced
             local.updatedAt         = Date()
@@ -323,6 +326,7 @@ struct ContentView: View {
             modelContext.insert(Habit(
                 title: remote.title,
                 entryType: remote.entryType,
+                createdAt: remote.localCreatedAt,
                 completedDayKeys: remote.completedDayKeys,
                 backendId: remote.id,
                 syncStatus: .synced,

@@ -70,9 +70,10 @@ struct HabitMetrics {
     let levelNote: String
 
     static func compute(for habits: [Habit], todayKey: String) -> HabitMetrics {
-        let totalHabits = habits.count
+        let todayEntries = habits.filter { isEntryActive($0, on: todayKey) }
+        let totalHabits = todayEntries.count
         let totalChecks = habits.reduce(0) { $0 + Set($1.completedDayKeys).count }
-        let doneToday = habits.filter { $0.completedDayKeys.contains(todayKey) }.count
+        let doneToday = todayEntries.filter { $0.completedDayKeys.contains(todayKey) }.count
         let progressToday = totalHabits > 0 ? Double(doneToday) / Double(totalHabits) : 0
         let perfectDays = perfectDayKeys(for: habits)
         let bestPerfectStreak = bestStreak(for: perfectDays)
@@ -247,19 +248,34 @@ struct HabitMetrics {
     static func perfectDayKeys(for habits: [Habit]) -> [String] {
         guard !habits.isEmpty else { return [] }
 
-        let calendar = Calendar.current
         let allKeys = Set(habits.flatMap(\.completedDayKeys))
 
         return allKeys
             .filter { key in
-                let day = calendar.startOfDay(for: DateKey.date(from: key))
-                let activeEntries = habits.filter {
-                    calendar.startOfDay(for: $0.createdAt) <= day
-                }
+                let activeEntries = habits.filter { isEntryActive($0, on: key) }
                 guard !activeEntries.isEmpty else { return false }
                 return activeEntries.allSatisfy { $0.completedDayKeys.contains(key) }
             }
             .sorted()
+    }
+
+    private static func isEntryActive(_ habit: Habit, on dayKey: String) -> Bool {
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: DateKey.date(from: dayKey))
+        guard calendar.startOfDay(for: habit.createdAt) <= day else {
+            return false
+        }
+
+        guard habit.entryType == .task else {
+            return true
+        }
+
+        let completedDates = habit.completedDayKeys.map { calendar.startOfDay(for: DateKey.date(from: $0)) }
+        guard let firstCompletedDate = completedDates.min() else {
+            return true
+        }
+
+        return firstCompletedDate >= day
     }
 
     private static func achievementMedals(for habits: [Habit], perfectDays: [String], totalChecks: Int, bestPerfectStreak: Int) -> [Medal] {

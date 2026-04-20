@@ -7,12 +7,14 @@ struct BackendHabit: Decodable, Identifiable {
     let reminderWindow: String?
     let checksByDate: [String: Bool]
     let entryType: HabitEntryType
+    let createdAt: Date?
 
     private enum CodingKeys: String, CodingKey {
         case id
         case title
         case reminderWindow
         case checksByDate
+        case createdAt
     }
 
     init(from decoder: Decoder) throws {
@@ -21,6 +23,7 @@ struct BackendHabit: Decodable, Identifiable {
         title = try container.decode(String.self, forKey: .title)
         reminderWindow = try container.decodeIfPresent(String.self, forKey: .reminderWindow)
         checksByDate = try container.decode([String: Bool].self, forKey: .checksByDate)
+        createdAt = Self.decodeDateIfPresent(from: container, forKey: .createdAt)
         entryType = .habit
     }
 
@@ -29,17 +32,52 @@ struct BackendHabit: Decodable, Identifiable {
         title: String,
         checksByDate: [String: Bool],
         reminderWindow: String? = nil,
-        entryType: HabitEntryType = .habit
+        entryType: HabitEntryType = .habit,
+        createdAt: Date? = nil
     ) {
         self.id = id
         self.title = title
         self.reminderWindow = reminderWindow
         self.checksByDate = checksByDate
         self.entryType = entryType
+        self.createdAt = createdAt
     }
 
     var completedDayKeys: [String] {
         checksByDate.filter { $0.value }.map(\.key).sorted()
+    }
+
+    var localCreatedAt: Date {
+        if let createdAt {
+            return createdAt
+        }
+        if let firstCompletedKey = completedDayKeys.first {
+            return DateKey.date(from: firstCompletedKey)
+        }
+        return Date()
+    }
+
+    private static func decodeDateIfPresent(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) -> Date? {
+        guard let raw = try? container.decodeIfPresent(String.self, forKey: key) else {
+            return nil
+        }
+
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: raw) {
+            return date
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: raw) {
+            return date
+        }
+
+        return DateKey.date(from: String(raw.prefix(10)))
     }
 }
 

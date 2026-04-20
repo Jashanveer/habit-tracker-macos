@@ -439,7 +439,8 @@ struct HabitRepository {
                 title: habit.title,
                 checksByDate: habit.checksByDate,
                 reminderWindow: habit.reminderWindow,
-                entryType: .habit
+                entryType: .habit,
+                createdAt: habit.createdAt
             )
         }
     }
@@ -452,7 +453,8 @@ struct HabitRepository {
                 title: task.title,
                 checksByDate: task.checksByDate,
                 reminderWindow: nil,
-                entryType: .task
+                entryType: .task,
+                createdAt: task.createdAt
             )
         }
     }
@@ -468,7 +470,8 @@ struct HabitRepository {
             title: habit.title,
             checksByDate: habit.checksByDate,
             reminderWindow: habit.reminderWindow,
-            entryType: .habit
+            entryType: .habit,
+            createdAt: habit.createdAt
         )
     }
 
@@ -483,7 +486,8 @@ struct HabitRepository {
             title: task.title,
             checksByDate: task.checksByDate,
             reminderWindow: nil,
-            entryType: .task
+            entryType: .task,
+            createdAt: task.createdAt
         )
     }
 
@@ -498,7 +502,8 @@ struct HabitRepository {
             title: habit.title,
             checksByDate: habit.checksByDate,
             reminderWindow: habit.reminderWindow,
-            entryType: .habit
+            entryType: .habit,
+            createdAt: habit.createdAt
         )
     }
 
@@ -513,7 +518,8 @@ struct HabitRepository {
             title: task.title,
             checksByDate: task.checksByDate,
             reminderWindow: nil,
-            entryType: .task
+            entryType: .task,
+            createdAt: task.createdAt
         )
     }
 
@@ -528,7 +534,8 @@ struct HabitRepository {
             title: habit.title,
             checksByDate: habit.checksByDate,
             reminderWindow: habit.reminderWindow,
-            entryType: .habit
+            entryType: .habit,
+            createdAt: habit.createdAt
         )
     }
 
@@ -543,7 +550,8 @@ struct HabitRepository {
             title: task.title,
             checksByDate: task.checksByDate,
             reminderWindow: nil,
-            entryType: .task
+            entryType: .task,
+            createdAt: task.createdAt
         )
     }
 

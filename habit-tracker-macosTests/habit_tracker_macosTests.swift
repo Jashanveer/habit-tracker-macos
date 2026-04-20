@@ -75,6 +75,35 @@ struct HabitMetricsTests {
         #expect(done.perfectDays.contains("2026-04-17"))
     }
 
+    @Test func completedTaskDoesNotBlockLaterPerfectDays() {
+        let habits = [
+            Habit(
+                title: "Read",
+                entryType: .habit,
+                createdAt: DateKey.date(from: "2026-04-10"),
+                completedDayKeys: ["2026-04-17", "2026-04-18"]
+            ),
+            Habit(
+                title: "Walk",
+                entryType: .habit,
+                createdAt: DateKey.date(from: "2026-04-10"),
+                completedDayKeys: ["2026-04-17", "2026-04-18"]
+            ),
+            Habit(
+                title: "Buy milk",
+                entryType: .task,
+                createdAt: DateKey.date(from: "2026-04-17"),
+                completedDayKeys: ["2026-04-17"]
+            )
+        ]
+
+        let m = HabitMetrics.compute(for: habits, todayKey: "2026-04-18")
+        #expect(m.perfectDays.contains("2026-04-17"))
+        #expect(m.perfectDays.contains("2026-04-18"))
+        #expect(m.totalHabits == 2)
+        #expect(m.doneToday == 2)
+    }
+
     @Test func perfectDayOnlyRequiresHabitsActiveThatDay() {
         let habits = [
             Habit(
@@ -93,6 +122,19 @@ struct HabitMetricsTests {
 
         let m = HabitMetrics.compute(for: habits, todayKey: "2026-04-18")
         #expect(m.perfectDays.contains("2026-04-17"))
+    }
+
+    @Test func backendHabitFallsBackToEarliestCompletedDateForLocalCreationDate() {
+        let remote = BackendHabit(
+            id: 42,
+            title: "Read",
+            checksByDate: [
+                "2026-04-16": true,
+                "2026-04-17": true
+            ]
+        )
+
+        #expect(DateKey.key(for: remote.localCreatedAt) == "2026-04-16")
     }
 }
 
