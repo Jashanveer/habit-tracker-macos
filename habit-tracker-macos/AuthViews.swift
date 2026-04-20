@@ -1,5 +1,352 @@
-import AppKit
 import SwiftUI
+
+// MARK: - App icon motion
+
+private struct AuthIconFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if !next.isEmpty {
+            value = next
+        }
+    }
+}
+
+struct AuthExperienceOverlay: View {
+    @ObservedObject var backend: HabitBackendStore
+    @Binding var isCompletingAuthentication: Bool
+    let onAuthenticated: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var iconNamespace
+    @State private var hasRunIntro = false
+    @State private var showLogin = false
+    @State private var introIconVisible = false
+    @State private var introProgress: CGFloat = 0
+    @State private var introIsReady = false
+    @State private var portalProgress: CGFloat = 0
+    @State private var loginIconFrame: CGRect = .zero
+
+    private var shouldShowOverlay: Bool {
+        !backend.isAuthenticated || isCompletingAuthentication
+    }
+
+    var body: some View {
+        Group {
+            if shouldShowOverlay {
+                ZStack {
+                    if showLogin {
+                        AuthGateView(backend: backend, iconNamespace: iconNamespace) {
+                            completeAuthentication()
+                        }
+                        .allowsHitTesting(!isCompletingAuthentication)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+
+                    if !showLogin && !backend.isAuthenticated {
+                        LaunchIconIntroView(
+                            iconVisible: introIconVisible,
+                            progress: introProgress,
+                            isReady: introIsReady,
+                            iconNamespace: iconNamespace
+                        )
+                        .transition(.opacity)
+                    }
+
+                    if isCompletingAuthentication {
+                        IconDashboardPortalView(
+                            progress: portalProgress,
+                            sourceFrame: loginIconFrame
+                        )
+                            .transition(.opacity)
+                    }
+                }
+                .coordinateSpace(name: "authOverlaySpace")
+                .onPreferenceChange(AuthIconFramePreferenceKey.self) { frame in
+                    loginIconFrame = frame
+                }
+                .background {
+                    CleanShotTheme.canvas(for: colorScheme)
+                        .ignoresSafeArea()
+                        .opacity(showLogin ? 0 : 1)
+                }
+                .task { await runIntroIfNeeded() }
+                .onChange(of: backend.isAuthenticated) { _, isAuthenticated in
+                    guard !isAuthenticated else { return }
+                    isCompletingAuthentication = false
+                    portalProgress = 0
+                    if hasRunIntro {
+                        showLogin = true
+                    }
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.24), value: shouldShowOverlay)
+    }
+
+    @MainActor
+    private func runIntroIfNeeded() async {
+        guard !hasRunIntro, !backend.isAuthenticated else {
+            if !backend.isAuthenticated {
+                showLogin = true
+            }
+            return
+        }
+
+        hasRunIntro = true
+        showLogin = false
+        introIconVisible = false
+        introProgress = 0
+        introIsReady = false
+
+        try? await Task.sleep(nanoseconds: 140_000_000)
+        withAnimation(.spring(response: 0.54, dampingFraction: 0.76)) {
+            introIconVisible = true
+        }
+
+        try? await Task.sleep(nanoseconds: 180_000_000)
+        withAnimation(.linear(duration: 1.05)) {
+            introProgress = 1
+        }
+
+        try? await Task.sleep(nanoseconds: 1_110_000_000)
+        withAnimation(.easeInOut(duration: 0.28)) {
+            introIsReady = true
+        }
+
+        try? await Task.sleep(nanoseconds: 260_000_000)
+        withAnimation(.smooth(duration: 0.78)) {
+            showLogin = true
+        }
+    }
+
+    private func completeAuthentication() {
+        guard !isCompletingAuthentication else { return }
+
+        isCompletingAuthentication = true
+        portalProgress = 0
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 70_000_000)
+            withAnimation(.smooth(duration: 1.58)) {
+                portalProgress = 1
+            }
+
+            try? await Task.sleep(nanoseconds: 1_240_000_000)
+            onAuthenticated()
+
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            withAnimation(.smooth(duration: 0.34)) {
+                isCompletingAuthentication = false
+                portalProgress = 0
+            }
+        }
+    }
+}
+
+private struct LaunchIconIntroView: View {
+    let iconVisible: Bool
+    let progress: CGFloat
+    let isReady: Bool
+    let iconNamespace: Namespace.ID
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            FloatingHabitBackground()
+                .opacity(iconVisible ? 1 : 0.86)
+
+            VStack(spacing: 18) {
+                ConstructingAppIconView(progress: progress)
+                    .frame(width: 214, height: 214)
+                    .matchedGeometryEffect(id: "auth-app-icon", in: iconNamespace)
+                    .shadow(
+                        color: CleanShotTheme.accent.opacity(colorScheme == .dark ? 0.34 : 0.22),
+                        radius: iconVisible ? 34 : 12,
+                        y: iconVisible ? 18 : 8
+                    )
+                    .scaleEffect(iconVisible ? 1 : 0.72)
+
+                VStack(spacing: 7) {
+                    Text(isReady ? "Ready." : "Building your day.")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.94) : Color.black.opacity(0.82))
+                        .contentTransition(.opacity)
+
+                    Text("Blue by blue, one checked square at a time.")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.48) : Color.black.opacity(0.44))
+                }
+                .opacity(iconVisible ? 1 : 0)
+                .offset(y: iconVisible ? 0 : 12)
+            }
+            .animation(.spring(response: 0.56, dampingFraction: 0.8), value: iconVisible)
+            .animation(.easeInOut(duration: 0.28), value: isReady)
+        }
+    }
+}
+
+private struct ConstructingAppIconView: View {
+    let progress: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let cornerRadius = side * 0.23
+            let cellSize = side * 0.084
+            let xStart = side * 0.25
+            let yStart = side * 0.252
+            let step = side * 0.134
+
+            ZStack {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color(red: 0.055, green: 0.067, blue: 0.088))
+
+                ForEach(0..<16, id: \.self) { index in
+                    let row = index / 4
+                    let column = index % 4
+                    let threshold = CGFloat(index + 1) / 16
+                    let visible = min(max((progress - threshold + 0.11) / 0.11, 0), 1)
+
+                    RoundedRectangle(cornerRadius: cellSize * 0.22, style: .continuous)
+                        .fill(cellColor(for: index, progress: progress))
+                        .frame(width: cellSize, height: cellSize)
+                        .scaleEffect(0.58 + visible * 0.42)
+                        .opacity(visible)
+                        .position(
+                            x: xStart + CGFloat(column) * step,
+                            y: yStart + CGFloat(row) * step
+                        )
+                }
+
+                CheckStroke(progress: max(0, min((progress - 0.82) / 0.16, 1)))
+                    .stroke(
+                        Color.white,
+                        style: StrokeStyle(lineWidth: side * 0.012, lineCap: .round, lineJoin: .round)
+                    )
+                    .frame(width: side * 0.09, height: side * 0.07)
+                    .position(x: side * 0.667, y: side * 0.294)
+                    .opacity(progress > 0.80 ? 1 : 0)
+
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    private func cellColor(for index: Int, progress: CGFloat) -> Color {
+        let blue = Color(red: 0.18, green: 0.58, blue: 0.86)
+        let dark = Color(red: 0.105, green: 0.126, blue: 0.160)
+
+        if progress < 0.88 {
+            return index < 12 ? blue : dark
+        }
+
+        switch index {
+        case 10:
+            return CleanShotTheme.gold
+        case 11...15:
+            return dark
+        default:
+            return blue
+        }
+    }
+}
+
+private struct CheckStroke: Shape {
+    let progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set {}
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let points = [
+            CGPoint(x: rect.minX, y: rect.midY * 1.04),
+            CGPoint(x: rect.minX + rect.width * 0.34, y: rect.maxY),
+            CGPoint(x: rect.maxX, y: rect.minY)
+        ]
+        let segments: [(CGPoint, CGPoint)] = [
+            (points[0], points[1]),
+            (points[1], points[2])
+        ]
+
+        var path = Path()
+        path.move(to: points[0])
+
+        let firstSegmentLimit: CGFloat = 0.42
+        if progress <= firstSegmentLimit {
+            let local = progress / firstSegmentLimit
+            path.addLine(to: interpolate(from: segments[0].0, to: segments[0].1, fraction: local))
+            return path
+        }
+
+        path.addLine(to: segments[0].1)
+        let local = (progress - firstSegmentLimit) / (1 - firstSegmentLimit)
+        path.addLine(to: interpolate(from: segments[1].0, to: segments[1].1, fraction: local))
+        return path
+    }
+
+    private func interpolate(from start: CGPoint, to end: CGPoint, fraction: CGFloat) -> CGPoint {
+        CGPoint(
+            x: start.x + (end.x - start.x) * fraction,
+            y: start.y + (end.y - start.y) * fraction
+        )
+    }
+}
+
+private struct IconDashboardPortalView: View {
+    let progress: CGFloat
+    let sourceFrame: CGRect
+
+    var body: some View {
+        GeometryReader { geo in
+            let longestSide = max(geo.size.width, geo.size.height)
+            let iconSize = sourceFrame.isEmpty ? CGFloat(60) : max(sourceFrame.width, sourceFrame.height)
+            let sourceCenter = sourceFrame.isEmpty
+                ? CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+                : CGPoint(x: sourceFrame.midX, y: sourceFrame.midY)
+            let viewportCenter = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+            let scale = 1 + easedProgress * (longestSide / iconSize * 4.15)
+            let blackPoint = CGPoint(x: iconSize * 0.23, y: iconSize * 0.29)
+            let targetOffsetX = (viewportCenter.x - sourceCenter.x - blackPoint.x * scale) * easedProgress
+            let targetOffsetY = (viewportCenter.y - sourceCenter.y - blackPoint.y * scale) * easedProgress
+            let backdropOpacity = smoothStep((progress - 0.42) / 0.34)
+            let fadeIcon = smoothStep((progress - 0.84) / 0.16)
+
+            ZStack {
+                Color.black
+                    .ignoresSafeArea()
+                    .opacity(backdropOpacity)
+
+                ConstructingAppIconView(progress: 1)
+                    .frame(width: iconSize, height: iconSize)
+                    .scaleEffect(scale)
+                    .position(sourceCenter)
+                    .offset(x: targetOffsetX, y: targetOffsetY)
+                    .opacity(1 - fadeIcon)
+                    .blur(radius: fadeIcon * 4)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .allowsHitTesting(true)
+        }
+        .ignoresSafeArea()
+    }
+
+    private var easedProgress: CGFloat {
+        let clamped = max(0, min(progress, 1))
+        return clamped * clamped * (3 - 2 * clamped)
+    }
+
+    private func smoothStep(_ value: CGFloat) -> CGFloat {
+        let clamped = max(0, min(value, 1))
+        return clamped * clamped * (3 - 2 * clamped)
+    }
+}
 
 // MARK: - Background pills
 
@@ -173,6 +520,7 @@ struct FloatingHabitBackground: View {
 
 struct AuthGateView: View {
     @ObservedObject var backend: HabitBackendStore
+    let iconNamespace: Namespace.ID
     let onAuthenticated: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -351,23 +699,18 @@ struct AuthGateView: View {
     // MARK: Sub-components
 
     private var appIcon: some View {
-        Group {
-            if let nsImage = NSImage(named: NSImage.applicationIconName) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .interpolation(.high)
-            } else {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(CleanShotTheme.accent)
-                    .overlay {
-                        Image(systemName: "square.grid.2x2.fill")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
+        ConstructingAppIconView(progress: 1)
+            .frame(width: 60, height: 60)
+            .matchedGeometryEffect(id: "auth-app-icon", in: iconNamespace)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: AuthIconFramePreferenceKey.self,
+                        value: proxy.frame(in: .named("authOverlaySpace"))
+                    )
+                }
             }
-        }
-        .frame(width: 60, height: 60)
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.18), radius: 14, y: 8)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.45 : 0.18), radius: 14, y: 8)
     }
 
     private var tabSwitcher: some View {

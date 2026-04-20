@@ -25,6 +25,8 @@ struct ContentViewScaffold: View {
     let stampNamespace: Namespace.ID
     let stampStagingIds: Set<PersistentIdentifier>
 
+    @State private var isCompletingAuthentication = false
+
     let onAddHabit: (HabitEntryType, Date?) -> Void
     let onToggleHabit: (Habit) -> Void
     let onDeleteHabit: (Habit) -> Void
@@ -217,13 +219,13 @@ struct ContentViewScaffold: View {
             }
         }
         .overlay {
-            if !backend.isAuthenticated {
-                AuthGateView(backend: backend) {
-                    onSync()
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                .zIndex(200)
-            }
+            AuthExperienceOverlay(
+                backend: backend,
+                isCompletingAuthentication: $isCompletingAuthentication,
+                onAuthenticated: onSync
+            )
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .zIndex(200)
         }
         .overlay(alignment: .bottom) {
             if showMentorCharacter && backend.isAuthenticated {
