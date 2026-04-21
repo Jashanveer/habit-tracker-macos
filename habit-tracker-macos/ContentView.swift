@@ -83,6 +83,13 @@ struct ContentView: View {
                 ? UserDefaults.standard.bool(forKey: onboardingKey)
                 : false
         }
+        .onChange(of: backend.isOnline) { wasOnline, isOnline in
+            // Connectivity restored — flush any offline edits to the server.
+            // flushOutbox inside syncWithBackend replays pending creates,
+            // metadata updates, and check toggles captured via pendingCheckDayKey.
+            guard !wasOnline, isOnline, backend.isAuthenticated else { return }
+            syncWithBackend()
+        }
         .onChange(of: backend.justRegistered) { _, isNew in
             guard isNew else { return }
             // Fresh registration — force the James Clear overview to appear once,
@@ -154,7 +161,6 @@ struct ContentView: View {
                 localHabit.reminderWindow = remoteHabit.reminderWindow
                 localHabit.syncStatus = .synced
                 localHabit.updatedAt  = Date()
-                backend.statusMessage = "\(entryType.title) synced"
                 backend.errorMessage  = nil
                 saveAndRefreshWidgets()
                 await backend.refreshDashboard()
@@ -183,7 +189,6 @@ struct ContentView: View {
                 applyReconcile(SyncEngine.reconcile(local: habits, remote: remote))
                 handleOverdueTasks()
                 saveAndRefreshWidgets()
-                backend.statusMessage = "Synced with \(BackendEnvironment.displayHost)"
                 backend.errorMessage  = nil
                 await backend.refreshDashboard()
                 refreshTimeReminders()

@@ -6,6 +6,11 @@ import SwiftUI
 /// card slot receives the icon via matched geometry), then plays the
 /// grid-cascade `FormaTransition` before dismissing to reveal the dashboard
 /// underneath.
+///
+/// When the user submits the auth form, the cascade starts immediately and
+/// acts as a loading cover: tiles fill the screen, hold while the request is
+/// in flight, then fade out when the backend confirms authentication (or
+/// reverse back to the auth card on failure).
 struct FormaIntroView: View {
     @ObservedObject var backend: HabitBackendStore
     let onReady: () -> Void
@@ -18,6 +23,16 @@ struct FormaIntroView: View {
     @State private var iconSize: CGFloat = 110
     @State private var titleVisible = false
     @State private var didStart = false
+    /// True while the cascade is acting as a loading cover for a pending
+    /// sign-in/register request. Drives failure recovery when the sync ends
+    /// without a successful authentication.
+    @State private var pendingAuthSubmission = false
+    /// Passed to `FormaTransition.readyToReveal`. Flips to true once the
+    /// in-flight auth request has settled (success → dashboard, failure →
+    /// back to the auth card). For the already-signed-in cold-launch path
+    /// this is set true at the moment we enter `.cascade` so the cascade
+    /// plays its original timeline uninterrupted.
+    @State private var cascadeShouldReveal = false
     @Namespace private var loginNamespace
 
     private enum Phase {
@@ -46,11 +61,29 @@ struct FormaIntroView: View {
             await runIntro()
         }
         .onChange(of: backend.isAuthenticated) { _, isAuth in
-            if isAuth, phase == .auth {
-                Task { await beginCascade() }
-            } else if !isAuth, phase == .done {
+            if isAuth {
+                // Request succeeded — let the cascade fade out.
+                if phase == .cascade {
+                    cascadeShouldReveal = true
+                } else if phase == .auth {
+                    Task { await beginCascade() }
+                }
+            } else if phase == .done {
                 resetToAuth()
             }
+        }
+        .onChange(of: backend.isSyncing) { wasSyncing, isSyncing in
+            // Auth attempt failed: the request ended (isSyncing true → false)
+            // while we're covering the screen but still unauthenticated. Let
+            // the cascade fade out so the auth card (with its error message)
+            // is revealed underneath.
+            guard wasSyncing, !isSyncing,
+                  phase == .cascade,
+                  pendingAuthSubmission,
+                  !backend.isAuthenticated
+            else { return }
+            pendingAuthSubmission = false
+            cascadeShouldReveal = true
         }
     }
 
@@ -58,6 +91,8 @@ struct FormaIntroView: View {
         buildStep = 5
         titleVisible = true
         iconSize = 64
+        pendingAuthSubmission = false
+        cascadeShouldReveal = false
         withAnimation(.smooth(duration: 0.3)) {
             phase = .auth
         }
@@ -79,6 +114,7 @@ struct FormaIntroView: View {
                 AuthGateView(
                     backend: backend,
                     iconNamespace: loginNamespace,
+                    onAuthSubmit: handleAuthSubmit,
                     onAuthenticated: {}
                 )
                 .transition(.opacity)
@@ -108,14 +144,43 @@ struct FormaIntroView: View {
             }
 
             if phase == .cascade {
-                FormaTransition {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        phase = .done
-                    }
-                    onReady()
+                FormaTransition(readyToReveal: cascadeShouldReveal) {
+                    handleCascadeComplete()
                 }
                 .transition(.opacity)
             }
+        }
+    }
+
+    /// Called when the cascade has fully faded out. Routes to `.done` on a
+    /// successful auth (dashboard ready underneath) or back to `.auth` when
+    /// the cascade was a loading cover for a request that failed.
+    @MainActor
+    private func handleCascadeComplete() {
+        if backend.isAuthenticated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                phase = .done
+            }
+            onReady()
+        } else {
+            pendingAuthSubmission = false
+            cascadeShouldReveal = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                phase = .auth
+            }
+        }
+    }
+
+    /// Triggered by `AuthGateView` the moment a sign-in / final-register
+    /// request is about to fire. Drops the cascade over the screen so the
+    /// user sees a cover instead of a spinner-on-card while the backend works.
+    @MainActor
+    private func handleAuthSubmit() {
+        guard phase == .auth else { return }
+        pendingAuthSubmission = true
+        cascadeShouldReveal = false
+        withAnimation(.smooth(duration: 0.25)) {
+            phase = .cascade
         }
     }
 
@@ -202,6 +267,12 @@ struct FormaIntroView: View {
 
     @MainActor
     private func beginCascade() async {
+        // Already-authenticated path: the backend has a valid session, so the
+        // cascade should play its full cascade-in → hold → fade timeline
+        // without waiting. Clear any lingering submission flag so the failure
+        // handler in onChange(isSyncing) doesn't misfire during this cascade.
+        pendingAuthSubmission = false
+        cascadeShouldReveal = true
         withAnimation(.smooth(duration: 0.3)) {
             phase = .cascade
         }

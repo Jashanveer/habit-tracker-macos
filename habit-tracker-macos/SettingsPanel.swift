@@ -4,7 +4,6 @@ struct SettingsPanel: View {
     let metrics: HabitMetrics
     @ObservedObject var backend: HabitBackendStore
     let habits: [Habit]
-    let onSync: () -> Void
     let onFindMentor: () -> Void
     let onReminderChange: (Habit, HabitReminderWindow?) -> Void
 
@@ -31,7 +30,7 @@ struct SettingsPanel: View {
                     Spacer()
                 }
 
-                AccountActionsCard(backend: backend, onSync: onSync, showDeleteConfirm: $showDeleteConfirm)
+                AccountActionsCard(backend: backend, showDeleteConfirm: $showDeleteConfirm)
 
                 MentorActionCard(metrics: metrics, dashboard: backend.dashboard, onFindMentor: onFindMentor)
 
@@ -82,7 +81,6 @@ struct SettingsPanel: View {
 
 struct AccountActionsCard: View {
     @ObservedObject var backend: HabitBackendStore
-    let onSync: () -> Void
     @Binding var showDeleteConfirm: Bool
 
     var body: some View {
@@ -101,7 +99,6 @@ struct AccountActionsCard: View {
             }
 
             HStack(spacing: 8) {
-                SoftActionButton(title: "Sync", systemImage: "arrow.clockwise", action: onSync)
                 SoftActionButton(title: "Sign out", systemImage: "rectangle.portrait.and.arrow.right", action: backend.signOut)
             }
 
@@ -625,8 +622,21 @@ struct TimeRemindersCard: View {
     let habits: [Habit]
     let onReminderChange: (Habit, HabitReminderWindow?) -> Void
 
+    @State private var isExpanded = false
+
+    private static let collapsedLimit = 3
+
     private var reminderCount: Int {
         habits.filter { $0.reminderWindow != nil }.count
+    }
+
+    private var hasMoreThanLimit: Bool {
+        habits.count > Self.collapsedLimit
+    }
+
+    private var visibleHabits: [Habit] {
+        guard hasMoreThanLimit, !isExpanded else { return habits }
+        return Array(habits.prefix(Self.collapsedLimit))
     }
 
     var body: some View {
@@ -658,12 +668,38 @@ struct TimeRemindersCard: View {
                 Divider()
 
                 VStack(spacing: 10) {
-                    ForEach(habits) { habit in
+                    ForEach(visibleHabits) { habit in
                         HabitTimeReminderRow(
                             habit: habit,
                             onReminderChange: onReminderChange
                         )
                     }
+                }
+
+                if hasMoreThanLimit {
+                    Button {
+                        withAnimation(.smooth(duration: 0.22)) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(isExpanded
+                                 ? "Show fewer"
+                                 : "Show \(habits.count - Self.collapsedLimit) more")
+                                .font(.caption.weight(.semibold))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 10, weight: .bold))
+                                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        }
+                        .foregroundStyle(CleanShotTheme.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                    .cleanShotSurface(
+                        shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+                        level: .control
+                    )
                 }
             }
         }

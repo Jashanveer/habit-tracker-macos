@@ -258,6 +258,10 @@ final class HabitBackendStore: ObservableObject {
     /// onboarding overview to appear regardless of any stale UserDefaults
     /// onboarded_<userId> key. UI should reset this to false after consuming.
     @Published var justRegistered: Bool = false
+    /// Mirrors `NWPathMonitor`. False while the device has no route to the
+    /// backend; the UI uses this to hide network-failure toasts and to trigger
+    /// a full sync on the next reconnection.
+    @Published private(set) var isOnline: Bool = true
 
     // Per-endpoint request states — UI can show per-section loading/error indicators
     @Published private(set) var authRequestState:        RequestState<Void>                    = .idle
@@ -293,6 +297,8 @@ final class HabitBackendStore: ObservableObject {
     private var lastStreamEventID: String?
     private var lastSentMessageAt: Date?
     private var lastSentMessageText: String?
+    private let networkMonitor = NetworkMonitor()
+    private var networkCancellable: AnyCancellable?
 
     var isAuthenticated: Bool { token != nil }
 
@@ -323,7 +329,28 @@ final class HabitBackendStore: ObservableObject {
         habitRepository           = HabitRepository(client: client)
         accountabilityRepository  = AccountabilityRepository(client: client)
         deviceRepository          = DeviceRepository(client: client)
+
+        isOnline = networkMonitor.isOnline
+        networkCancellable = networkMonitor.$isOnline
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] online in
+                guard let self else { return }
+                guard self.isOnline != online else { return }
+                self.isOnline = online
+                if online {
+                    // Connectivity restored — clear any stale "offline" toast so
+                    // the UI can reflect the recovery immediately. The caller
+                    // (ContentView) drives the outbox flush via syncWithBackend.
+                    if self.errorMessage == Self.offlineStatusMessage {
+                        self.errorMessage = nil
+                    }
+                }
+            }
     }
+
+    /// Shown in place of raw URLSession errors when the device is offline.
+    /// Kept short so the existing error banner reads like a status line.
+    fileprivate static let offlineStatusMessage = "Offline — changes will sync when you're back online."
 
     // MARK: - Convenience
 
@@ -339,7 +366,7 @@ final class HabitBackendStore: ObservableObject {
         do {
             let session = try await authRepository.signIn(username: username, password: password)
             applySession(session)
-            statusMessage = "Connected to \(BackendEnvironment.displayHost)"
+            statusMessage = nil
             errorMessage = nil
             authRequestState = .success(())
         } catch {
@@ -381,7 +408,7 @@ final class HabitBackendStore: ObservableObject {
             )
             applySession(session)
             justRegistered = true
-            statusMessage = "Connected to \(BackendEnvironment.displayHost)"
+            statusMessage = nil
             errorMessage = nil
             authRequestState = .success(())
         } catch {
@@ -897,6 +924,13 @@ final class HabitBackendStore: ObservableObject {
         if case HabitBackendError.notAuthenticated = error {
             clearSession(errorMessage: error.localizedDescription)
             Task { await apiClient.clearSession() }
+            return
+        }
+        // Network failures while offline are expected — the outbox will retain
+        // the change and flushOutbox will retry once connectivity returns.
+        // Surface a single soft status line instead of a per-request error toast.
+        if case HabitBackendError.network = error {
+            errorMessage = Self.offlineStatusMessage
             return
         }
         errorMessage = error.localizedDescription

@@ -420,6 +420,12 @@ struct FloatingHabitBackground: View {
 struct AuthGateView: View {
     @ObservedObject var backend: HabitBackendStore
     let iconNamespace: Namespace.ID
+    /// Called synchronously on the main actor the moment an auth-completing
+    /// request (sign in, or final register with verification code) is about to
+    /// fire. Intended for the parent to start a loading cover before the API
+    /// response lands. Not called for the "send verification code" step since
+    /// that doesn't lead to an authenticated session.
+    var onAuthSubmit: () -> Void = {}
     let onAuthenticated: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -781,6 +787,7 @@ struct AuthGateView: View {
         Task {
             switch mode {
             case .signIn:
+                onAuthSubmit()
                 await backend.signIn(username: trimmedUsername, password: password)
             case .signUp:
                 if !isVerificationCodeSent {
@@ -792,6 +799,7 @@ struct AuthGateView: View {
                     return
                 }
 
+                onAuthSubmit()
                 await backend.register(
                     username: trimmedUsername,
                     email: trimmedEmail,
@@ -1026,54 +1034,20 @@ enum FormaQuotes {
     ]
 }
 
-// MARK: - Connection status pill (unchanged)
+// MARK: - Connection status icon
 
-struct ConnectionStatusPill: View {
+/// Minimal online/offline indicator. Blue cloud when connected, struck-through
+/// grey cloud when the device has no route to the backend. The sync itself is
+/// automatic (flushOutbox fires on reconnect) so there's no manual button.
+struct ConnectionStatusIcon: View {
     @ObservedObject var backend: HabitBackendStore
-    let onSync: () -> Void
-
-    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: backend.isAuthenticated ? "server.rack" : "wifi.slash")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(backend.errorMessage == nil ? CleanShotTheme.success : CleanShotTheme.warning)
-
-            Text(statusText)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-
-            if backend.isSyncing {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.72)
-            } else if backend.isAuthenticated {
-                Button(action: onSync) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 30)
-        .cleanShotSurface(shape: Capsule(), level: .control, isActive: isHovered)
-        .onHover { isHovered = $0 }
-    }
-
-    private var statusText: String {
-        if let errorMessage = backend.errorMessage {
-            return errorMessage
-        }
-
-        if backend.isSyncing {
-            return "Syncing..."
-        }
-
-        return backend.isAuthenticated
-            ? (backend.statusMessage ?? "Connected to \(BackendEnvironment.displayHost)")
-            : "Backend sign in required"
+        Image(systemName: backend.isOnline ? "icloud.fill" : "icloud.slash")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(backend.isOnline ? Color.formaBlue : Color.secondary)
+            .opacity(backend.isOnline ? 1 : 0.6)
+            .accessibilityLabel(backend.isOnline ? "Online" : "Offline")
+            .animation(.easeInOut(duration: 0.2), value: backend.isOnline)
     }
 }

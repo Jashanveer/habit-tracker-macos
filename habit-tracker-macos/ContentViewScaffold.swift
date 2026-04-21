@@ -107,7 +107,6 @@ struct ContentViewScaffold: View {
                         metrics: metrics,
                         backend: backend,
                         habits: habits.filter { $0.entryType == .habit },
-                        onSync: onSync,
                         onFindMentor: onFindMentor,
                         onReminderChange: onReminderChange
                     )
@@ -211,9 +210,9 @@ struct ContentViewScaffold: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            ConnectionStatusPill(backend: backend, onSync: onSync)
-                .padding(.top, 12)
-                .padding(.trailing, 16)
+            ConnectionStatusIcon(backend: backend)
+                .padding(.top, 16)
+                .padding(.trailing, 20)
         }
         .overlay {
             if showOnboarding {
