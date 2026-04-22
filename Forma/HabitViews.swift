@@ -37,6 +37,9 @@ struct AddHabitBar: View {
                     .font(.system(size: 14))
                     .padding(.leading, 16)
                     .focused($fieldFocused)
+                    // Habits can't be renamed after creation, so surface
+                    // spell-check before the user commits to the spelling.
+                    .autocorrectionDisabled(false)
                     .onChange(of: newHabitTitle) { _, _ in showValidationError = false }
                     .onSubmit(attemptAdd)
 
@@ -1260,7 +1263,7 @@ struct FriendsLeaderboardPill: View {
             }
         }
         .padding(.vertical, 8)
-        .frame(minWidth: 220)
+        .frame(width: 260)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

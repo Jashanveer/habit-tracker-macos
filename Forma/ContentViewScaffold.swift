@@ -18,7 +18,6 @@ struct ContentViewScaffold: View {
     @Binding var mentorNudge: String?
     let showMentorCharacter: Bool
     let showMenteeCharacter: Bool
-    let mentorMissedCount: Int
 
     let showOnboarding: Bool
 
@@ -29,7 +28,6 @@ struct ContentViewScaffold: View {
     let onToggleHabit: (Habit) -> Void
     let onDeleteHabit: (Habit) -> Void
     let onSync: () -> Void
-    let onFindMentor: () -> Void
     let onReminderChange: (Habit, HabitReminderWindow?) -> Void
     let onCompleteOnboarding: ([String]) -> Void
 
@@ -107,7 +105,6 @@ struct ContentViewScaffold: View {
                         metrics: metrics,
                         backend: backend,
                         habits: habits.filter { $0.entryType == .habit },
-                        onFindMentor: onFindMentor,
                         onReminderChange: onReminderChange
                     )
                     .frame(width: 330)
@@ -237,23 +234,8 @@ struct ContentViewScaffold: View {
         }
         .overlay(alignment: .bottom) {
             if showMenteeCharacter && backend.isAuthenticated {
-                MenteeCharacterView(backend: backend, mentorMissedCount: mentorMissedCount)
+                MenteeCharacterView(backend: backend)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .overlay(alignment: .bottomLeading) {
-            if showMenteeCharacter && backend.isAuthenticated && mentorMissedCount > 0 {
-                MentorAlertBanner(
-                    missedCount: mentorMissedCount,
-                    mentees: backend.dashboard?.mentorDashboard.mentees ?? [],
-                    onNudge: { matchId in
-                        Task { await backend.sendNudge(matchId: matchId) }
-                    }
-                )
-                .padding(.leading, 20)
-                .padding(.bottom, 148)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: mentorMissedCount)
             }
         }
         .frame(minWidth: 900, minHeight: 600)

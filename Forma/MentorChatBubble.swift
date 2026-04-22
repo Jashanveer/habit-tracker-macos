@@ -5,15 +5,32 @@ struct MentorChatBubble: View {
     var isAI: Bool = false
     let messages: [AccountabilityDashboard.Message]
     @Binding var messageText: String
+    var inlineError: String? = nil
     let onSend: () -> Void
     let onClose: () -> Void
+    var isExpanded: Bool = false
+    var onToggleExpand: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var inputFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             // Title bar — green theme
             HStack {
+                if let onToggleExpand {
+                    Button(action: onToggleExpand) {
+                        Image(systemName: isExpanded
+                              ? "arrow.down.right.and.arrow.up.left"
+                              : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(isExpanded ? "Shrink chat" : "Expand chat")
+                }
                 Circle()
                     .fill(.green)
                     .frame(width: 8, height: 8)
@@ -25,7 +42,7 @@ struct MentorChatBubble: View {
                             MentorAIBadge()
                         }
                     }
-                    Text(isAI ? "AI mentor — until a human matches" : "Your mentor")
+                    Text(isAI ? "AI mentor — here to keep you on track" : "Your mentor")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
@@ -73,11 +90,24 @@ struct MentorChatBubble: View {
 
             Divider()
 
+            if let inlineError, !inlineError.isEmpty {
+                Text(inlineError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08))
+            }
+
             // Input row
             HStack(spacing: 8) {
-                TextField("Message...", text: $messageText)
+                TextField("Message...", text: $messageText, axis: isExpanded ? .vertical : .horizontal)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.system(size: isExpanded ? 14 : 12))
+                    .lineLimit(isExpanded ? 1...5 : 1...1)
+                    .focused($inputFocused)
                     .onSubmit(onSend)
 
                 Button(action: onSend) {
@@ -104,6 +134,11 @@ struct MentorChatBubble: View {
                     lineWidth: 0.5
                 )
         )
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                inputFocused = true
+            }
+        }
     }
 
     private var titleBarColor: Color {

@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-/// Shared palette and primitives for the habit-tracker widgets.
+/// Shared palette and primitives for the Forma widgets.
 /// Colours mirror the design spec (dark-first, light-mode-aware via Color.primary).
 enum WidgetPalette {
     static let accent  = Color(red: 46/255,  green: 148/255, blue: 219/255)

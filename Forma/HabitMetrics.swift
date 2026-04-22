@@ -199,14 +199,9 @@ struct HabitMetrics {
     }
 
     private static func levelNote(for level: UserLevel, mentorEligible: Bool, needsMentor: Bool, daysUntilMentor: Int) -> String {
+        // AI mentor is unlocked on day one — no "unlock in N days" gating.
         if needsMentor {
-            return "A mentor match is ready. The goal is support, not pressure."
-        }
-        if mentorEligible {
-            return "You can mentor another user with gentle nudges and encouragement."
-        }
-        if daysUntilMentor > 0 {
-            return "Keep tracking for \(daysUntilMentor) more \(daysUntilMentor == 1 ? "day" : "days") to unlock mentor review."
+            return "Bruce has tips ready when you open the chat. The goal is support, not pressure."
         }
         return "Current rank: \(level.rawValue). Build consistency before chasing intensity."
     }

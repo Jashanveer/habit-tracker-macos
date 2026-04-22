@@ -38,16 +38,18 @@ struct ContentView: View {
     private var todayKey: String { DateKey.key(for: Date()) }
     private var metrics: HabitMetrics { HabitMetrics.compute(for: habits, todayKey: todayKey) }
 
+    // AI mentor is always on once the user is signed in.
     private var showMentorCharacter: Bool {
-        return backend.dashboard?.match != nil
+        backend.isAuthenticated
     }
 
+    // Mentee slot surfaces a top-leaderboard friend — only shown when the
+    // user has at least one friend on the leaderboard.
     private var showMenteeCharacter: Bool {
-        return (backend.dashboard?.mentorDashboard.activeMenteeCount ?? 0) > 0
-    }
-
-    private var mentorMissedCount: Int {
-        backend.dashboard?.mentorDashboard.mentees.reduce(0) { $0 + $1.missedHabitsToday } ?? 0
+        guard backend.isAuthenticated else { return false }
+        let friendCount = backend.dashboard?.social?.friendCount ?? 0
+        let leaderboard = backend.dashboard?.weeklyChallenge.leaderboard ?? []
+        return friendCount > 0 && !leaderboard.isEmpty
     }
 
     var body: some View {
@@ -66,7 +68,6 @@ struct ContentView: View {
             mentorNudge: $mentorNudge,
             showMentorCharacter: showMentorCharacter,
             showMenteeCharacter: showMenteeCharacter,
-            mentorMissedCount: mentorMissedCount,
             showOnboarding: showOnboarding,
             stampNamespace: stampNamespace,
             stampStagingIds: stampStagingIds,
@@ -74,14 +75,11 @@ struct ContentView: View {
             onToggleHabit: toggleHabit,
             onDeleteHabit: archiveHabit,
             onSync: syncWithBackend,
-            onFindMentor: assignMentor,
             onReminderChange: updateReminderWindow,
             onCompleteOnboarding: completeOnboarding
         )
         .onChange(of: backend.isAuthenticated) { _, isAuth in
-            hasCompletedOnboarding = isAuth
-                ? UserDefaults.standard.bool(forKey: onboardingKey)
-                : false
+            hasCompletedOnboarding = isAuth ? resolveOnboardingState() : false
         }
         .onChange(of: backend.isOnline) { wasOnline, isOnline in
             // Connectivity restored — flush any offline edits to the server.
@@ -101,7 +99,7 @@ struct ContentView: View {
         }
         .onAppear {
             if backend.isAuthenticated {
-                hasCompletedOnboarding = UserDefaults.standard.bool(forKey: onboardingKey)
+                hasCompletedOnboarding = resolveOnboardingState()
             }
             refreshTimeReminders()
         }
@@ -547,6 +545,19 @@ struct ContentView: View {
 
     // MARK: - Onboarding
 
+    /// Decides whether to skip onboarding for an authenticated user.
+    /// Onboarding is signup-only — existing accounts that sign in (including on a
+    /// new device with no UserDefaults state) should never see it.
+    private func resolveOnboardingState() -> Bool {
+        let key = onboardingKey
+        if UserDefaults.standard.bool(forKey: key) { return true }
+        if !backend.justRegistered {
+            UserDefaults.standard.set(true, forKey: key)
+            return true
+        }
+        return false
+    }
+
     private func completeOnboarding(_ habitTitles: [String]) {
         for title in habitTitles {
             let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -570,10 +581,6 @@ struct ContentView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             withAnimation(.easeOut(duration: 0.5)) { showCelebration = false }
         }
-    }
-
-    private func assignMentor() {
-        Task { await backend.assignMentor() }
     }
 
     private func refreshTimeReminders() {

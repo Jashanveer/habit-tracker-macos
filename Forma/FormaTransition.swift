@@ -44,7 +44,8 @@ struct FormaTransition: View {
                     ForEach(0..<rows * cols, id: \.self) { i in
                         let row = i / cols
                         let col = i % cols
-                        let isGold = i.isMultiple(of: 2)
+                        // Checkerboard: alternate both horizontally and vertically.
+                        let isGold = (row + col).isMultiple(of: 2)
                         Rectangle()
                             .fill(isGold ? Color.formaGold : Color.formaBlue)
                             .frame(width: tileW, height: tileH)
