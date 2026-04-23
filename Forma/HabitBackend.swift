@@ -303,6 +303,13 @@ final class HabitBackendStore: ObservableObject {
     @Published private(set) var preferencesRequestState: RequestState<UserPreferences>         = .idle
     @Published private(set) var preferences:             UserPreferences?                       = nil
     @Published private(set) var liveMessagesByMatch:     [Int64: [AccountabilityDashboard.Message]] = [:]
+    /// True while we're waiting on the AI mentor to deliver a reply to the
+    /// mentee's latest message. Drives the "mentor is typing…" bubble in
+    /// MentorChatBubble. Flipped on in `sendMenteeMessage` for AI matches
+    /// and cleared the moment a new AI mentor message arrives via SSE (or
+    /// after a generous timeout, as a safety net).
+    @Published private(set) var aiMentorTyping: Bool = false
+    private var aiMentorTypingTimeoutTask: Task<Void, Never>?
 
     // MARK: Private
 
@@ -396,8 +403,17 @@ final class HabitBackendStore: ObservableObject {
     // MARK: - Convenience
 
     func messages(matchID: Int64?) -> [AccountabilityDashboard.Message] {
-        guard let matchID else { return dashboard?.menteeDashboard.messages ?? [] }
-        return liveMessagesByMatch[matchID] ?? dashboard?.menteeDashboard.messages ?? []
+        let source: [AccountabilityDashboard.Message]
+        if let matchID {
+            source = liveMessagesByMatch[matchID] ?? dashboard?.menteeDashboard.messages ?? []
+        } else {
+            source = dashboard?.menteeDashboard.messages ?? []
+        }
+        // Sort chronologically (oldest → newest). Messages come from two
+        // sources — the dashboard snapshot and SSE `message.created` events —
+        // each with their own ordering, so normalise on read for a stable
+        // chat transcript.
+        return source.sorted { $0.createdAt < $1.createdAt }
     }
 
     // MARK: - Auth
@@ -744,6 +760,15 @@ final class HabitBackendStore: ObservableObject {
         lastSentMessageAt = now
         lastSentMessageText = trimmed
         messageRequestState = .loading; refreshSyncingState()
+
+        // Immediately raise the "mentor is typing…" indicator for AI matches
+        // so the UI has something to show during the async Gemini round-trip.
+        // Cleared in `appendMessage` the moment the AI reply lands via SSE,
+        // or after a safety timeout if the stream is slow.
+        let isAI = dashboard?.match?.aiMentor ?? false
+        if isAI {
+            setAIMentorTyping(true, matchId: matchId)
+        }
         do {
             let value = try await accountabilityRepository.sendMenteeMessage(matchId: matchId, message: trimmed)
             await syncSessionFromClient()
@@ -752,10 +777,41 @@ final class HabitBackendStore: ObservableObject {
             messageRequestState = .success(())
             errorMessage = nil
         } catch {
+            setAIMentorTyping(false, matchId: matchId)
             handleAuthenticatedRequestError(error)
             messageRequestState = .failure(error.localizedDescription)
         }
         refreshSyncingState()
+    }
+
+    /// Flips the typing indicator on/off. While the indicator is on, also
+    /// runs a light polling loop that refreshes the dashboard every 3s as a
+    /// fallback for any case where the SSE event gets dropped (flaky
+    /// network, proxy buffering, etc.) — a dashboard refresh will pick up
+    /// the AI message via the merge in `applyDashboardUpdate`, which in
+    /// turn fires `appendMessage` and clears this indicator.
+    private func setAIMentorTyping(_ typing: Bool, matchId: Int64) {
+        aiMentorTyping = typing
+        aiMentorTypingTimeoutTask?.cancel()
+        aiMentorTypingTimeoutTask = nil
+        guard typing else { return }
+        aiMentorTypingTimeoutTask = Task { [weak self] in
+            var elapsed: TimeInterval = 0
+            let poll: TimeInterval = 3
+            let maxWait: TimeInterval = 45
+            while elapsed < maxWait {
+                try? await Task.sleep(for: .seconds(poll))
+                if Task.isCancelled { return }
+                guard let self, self.aiMentorTyping else { return }
+                await self.responseCache.invalidateDashboard()
+                await self.refreshDashboard()
+                elapsed += poll
+            }
+            // Hard timeout — clear the indicator so the UI doesn't hang
+            // forever if the AI call failed silently.
+            guard let self, !Task.isCancelled else { return }
+            await MainActor.run { self.aiMentorTyping = false }
+        }
     }
 
     func requestFriend(userID: Int64) async {
@@ -905,7 +961,14 @@ final class HabitBackendStore: ObservableObject {
         dashboard = value
         WidgetSnapshotWriter.shared.updateBackendData(value)
         if let matchID = value.match?.id {
-            liveMessagesByMatch[matchID] = value.menteeDashboard.messages
+            // Merge the dashboard snapshot with whatever SSE has already
+            // delivered — dropping existing live entries would wipe an AI
+            // reply that landed between the server's snapshot time and the
+            // client applying the response.
+            var merged: [Int64: AccountabilityDashboard.Message] = [:]
+            for msg in value.menteeDashboard.messages { merged[msg.id] = msg }
+            for msg in liveMessagesByMatch[matchID] ?? [] { merged[msg.id] = msg }
+            liveMessagesByMatch[matchID] = merged.values.sorted { $0.createdAt < $1.createdAt }
             startStream(for: matchID)
         } else {
             stopStream()
@@ -1009,9 +1072,21 @@ final class HabitBackendStore: ObservableObject {
     private func appendMessage(_ message: AccountabilityDashboard.Message, to matchID: Int64) {
         var msgs = liveMessagesByMatch[matchID] ?? []
         guard !msgs.contains(where: { $0.id == message.id }) else { return }
-        msgs.insert(message, at: 0)
-        if msgs.count > 60 { msgs = Array(msgs.prefix(60)) }
+        msgs.append(message)
+        // Sort chronologically so the chat view doesn't depend on insertion
+        // order (dashboard snapshot + SSE deliveries can interleave).
+        msgs.sort { $0.createdAt < $1.createdAt }
+        if msgs.count > 60 { msgs = Array(msgs.suffix(60)) }
         liveMessagesByMatch[matchID] = msgs
+
+        // Clear the "typing…" indicator the moment a message from the AI
+        // mentor lands — this is the real signal the reply arrived.
+        if let match = dashboard?.match,
+           match.id == matchID,
+           match.aiMentor,
+           message.senderId == match.mentor.userId {
+            setAIMentorTyping(false, matchId: matchID)
+        }
     }
 
     // MARK: - Error handling

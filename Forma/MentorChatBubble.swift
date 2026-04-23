@@ -3,7 +3,12 @@ import SwiftUI
 struct MentorChatBubble: View {
     let mentorName: String
     var isAI: Bool = false
+    /// Already sorted chronologically (oldest → newest) by HabitBackendStore.
     let messages: [AccountabilityDashboard.Message]
+    /// True while we're waiting on the AI mentor's reply. Renders a
+    /// three-dot typing bubble below the last message so the user gets
+    /// immediate feedback during the Gemini round-trip.
+    var isMentorTyping: Bool = false
     @Binding var messageText: String
     var inlineError: String? = nil
     var currentUserId: String? = nil
@@ -14,6 +19,10 @@ struct MentorChatBubble: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var inputFocused: Bool
+
+    // Sentinel placed at the bottom of the scroll contents so we can anchor
+    // auto-scroll to a stable target regardless of message count.
+    private let bottomAnchorID = "chat-bottom-anchor"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,9 +52,10 @@ struct MentorChatBubble: View {
                             MentorAIBadge()
                         }
                     }
-                    Text(isAI ? "AI mentor — here to keep you on track" : "Your mentor")
+                    Text(subtitleText)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                        .contentTransition(.opacity)
                 }
                 Spacer()
                 Button(action: onClose) {
@@ -61,11 +71,12 @@ struct MentorChatBubble: View {
 
             Divider()
 
-            // Messages
+            // Messages — rendered oldest → newest, with a typing row at the
+            // tail and auto-scroll to the bottom on any change.
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        if messages.isEmpty {
+                        if messages.isEmpty && !isMentorTyping {
                             Text("Say hi to your mentor!")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
@@ -77,15 +88,31 @@ struct MentorChatBubble: View {
                             ChatMessageRow(message: msg, isFromCurrentUser: isFromCurrentUser(msg))
                                 .id(msg.id)
                         }
+
+                        if isMentorTyping {
+                            TypingIndicatorRow(mentorName: mentorName)
+                                .id("typing-indicator")
+                                .transition(.asymmetric(
+                                    insertion: .scale(scale: 0.85, anchor: .bottomLeading).combined(with: .opacity),
+                                    removal: .opacity
+                                ))
+                        }
+
+                        // Empty sentinel we can always scroll to.
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorID)
                     }
                     .padding(10)
                 }
                 .onChange(of: messages.count) { _, _ in
-                    if let newest = messages.first {
-                        withAnimation {
-                            proxy.scrollTo(newest.id, anchor: .top)
-                        }
-                    }
+                    scrollToBottom(proxy: proxy, animated: true)
+                }
+                .onChange(of: isMentorTyping) { _, _ in
+                    scrollToBottom(proxy: proxy, animated: true)
+                }
+                .onAppear {
+                    scrollToBottom(proxy: proxy, animated: false)
                 }
             }
 
@@ -142,6 +169,22 @@ struct MentorChatBubble: View {
         }
     }
 
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
+        let target = isMentorTyping ? "typing-indicator" : bottomAnchorID
+        if animated {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                proxy.scrollTo(target, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(target, anchor: .bottom)
+        }
+    }
+
+    private var subtitleText: String {
+        if isMentorTyping { return "typing…" }
+        return isAI ? "AI mentor — here to keep you on track" : "Your mentor"
+    }
+
     private func isFromCurrentUser(_ message: AccountabilityDashboard.Message) -> Bool {
         guard let currentUserId else { return false }
         return String(message.senderId) == currentUserId
@@ -157,6 +200,55 @@ struct MentorChatBubble: View {
         colorScheme == .dark
             ? Color(red: 0.09, green: 0.12, blue: 0.10)
             : Color.white
+    }
+}
+
+/// Left-aligned "mentor is typing…" bubble with three pulsing dots. Rendered
+/// inside the chat list so it sits exactly where the next mentor reply will
+/// appear — makes the transition feel continuous.
+private struct TypingIndicatorRow: View {
+    let mentorName: String
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var phase: Int = 0
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(mentorName)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 4) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Circle()
+                            .fill(Color.secondary.opacity(phase == i ? 0.85 : 0.35))
+                            .frame(width: 6, height: 6)
+                            .scaleEffect(phase == i ? 1.15 : 1)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(bubbleColor)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .animation(.easeInOut(duration: 0.45), value: phase)
+            }
+
+            Spacer(minLength: 40)
+        }
+        .task(id: "typing-loop") {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(360))
+                if Task.isCancelled { break }
+                await MainActor.run { phase = (phase + 1) % 3 }
+            }
+        }
+        .accessibilityLabel("Mentor is typing")
+    }
+
+    private var bubbleColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color(red: 0.93, green: 0.93, blue: 0.95)
     }
 }
 
