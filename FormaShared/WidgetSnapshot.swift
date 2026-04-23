@@ -70,6 +70,71 @@ struct WidgetSnapshot: Codable {
         let checksToday: Int
         let dailyCap: Int
         let freezesAvailable: Int
+        /// True when today is covered by a streak freeze. Widgets should flag
+        /// this with a snowflake indicator so users see the protection state
+        /// without opening the app. Decoded with a default so older snapshots
+        /// written before this field existed still load.
+        let frozenToday: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case xp, levelName, weeklyConsistencyPercent, accountabilityScore
+            case checksToday, dailyCap, freezesAvailable, frozenToday
+            case challenge, leaderboard, mentor, mentees, activeMenteeCount
+            case friends, friendCount
+        }
+
+        init(
+            xp: Int,
+            levelName: String,
+            weeklyConsistencyPercent: Int,
+            accountabilityScore: Int,
+            checksToday: Int,
+            dailyCap: Int,
+            freezesAvailable: Int,
+            frozenToday: Bool = false,
+            challenge: Challenge,
+            leaderboard: [LeaderEntry],
+            mentor: MentorCard?,
+            mentees: [MenteeCard],
+            activeMenteeCount: Int,
+            friends: [FriendCard],
+            friendCount: Int
+        ) {
+            self.xp = xp
+            self.levelName = levelName
+            self.weeklyConsistencyPercent = weeklyConsistencyPercent
+            self.accountabilityScore = accountabilityScore
+            self.checksToday = checksToday
+            self.dailyCap = dailyCap
+            self.freezesAvailable = freezesAvailable
+            self.frozenToday = frozenToday
+            self.challenge = challenge
+            self.leaderboard = leaderboard
+            self.mentor = mentor
+            self.mentees = mentees
+            self.activeMenteeCount = activeMenteeCount
+            self.friends = friends
+            self.friendCount = friendCount
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            xp = try c.decode(Int.self, forKey: .xp)
+            levelName = try c.decode(String.self, forKey: .levelName)
+            weeklyConsistencyPercent = try c.decode(Int.self, forKey: .weeklyConsistencyPercent)
+            accountabilityScore = try c.decode(Int.self, forKey: .accountabilityScore)
+            checksToday = try c.decode(Int.self, forKey: .checksToday)
+            dailyCap = try c.decode(Int.self, forKey: .dailyCap)
+            freezesAvailable = try c.decode(Int.self, forKey: .freezesAvailable)
+            frozenToday = try c.decodeIfPresent(Bool.self, forKey: .frozenToday) ?? false
+            challenge = try c.decode(Challenge.self, forKey: .challenge)
+            leaderboard = try c.decode([LeaderEntry].self, forKey: .leaderboard)
+            mentor = try c.decodeIfPresent(MentorCard.self, forKey: .mentor)
+            mentees = try c.decode([MenteeCard].self, forKey: .mentees)
+            activeMenteeCount = try c.decode(Int.self, forKey: .activeMenteeCount)
+            friends = try c.decode([FriendCard].self, forKey: .friends)
+            friendCount = try c.decode(Int.self, forKey: .friendCount)
+        }
 
         let challenge: Challenge
         let leaderboard: [LeaderEntry]

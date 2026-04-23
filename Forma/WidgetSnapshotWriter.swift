@@ -206,6 +206,7 @@ final class WidgetSnapshotWriter {
             .init(displayName: $0.displayName, score: $0.score, currentUser: $0.currentUser)
         }
 
+        let todayKey = DateKey.key(for: Date())
         return WidgetSnapshot.BackendData(
             xp: d.rewards.xp,
             levelName: d.level.name,
@@ -214,6 +215,7 @@ final class WidgetSnapshotWriter {
             checksToday: d.rewards.checksToday,
             dailyCap: d.rewards.dailyCap,
             freezesAvailable: d.rewards.freezesAvailable,
+            frozenToday: d.rewards.frozenDates.contains(todayKey),
             challenge: .init(
                 title: d.weeklyChallenge.title,
                 completedPerfectDays: d.weeklyChallenge.completedPerfectDays,

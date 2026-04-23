@@ -12,6 +12,9 @@ struct CenterPanel: View {
     var clusters: [AccountabilityDashboard.HabitTimeCluster] = []
     let stampNamespace: Namespace.ID
     let stampStagingIds: Set<PersistentIdentifier>
+    /// Today is protected by a streak freeze. When true the list renders every
+    /// habit in its frozen (icy-blue) state and does not hide completed ones.
+    var isFrozenToday: Bool = false
     let onAddHabit: (HabitEntryType, Date?) -> Void
     let onToggleHabit: (Habit) -> Void
     let onDeleteHabit: (Habit) -> Void
@@ -20,7 +23,8 @@ struct CenterPanel: View {
     @State private var hasRequestedGreeting = false
 
     private var pendingHabits: [Habit] {
-        habits.filter { habit in
+        if isFrozenToday { return habits }
+        return habits.filter { habit in
             let isDone: Bool = {
                 switch habit.entryType {
                 case .habit: return habit.completedDayKeys.contains(todayKey)
@@ -39,7 +43,7 @@ struct CenterPanel: View {
         Habit.hasDuplicate(title: newHabitTitle, entryType: newEntryType, in: habits)
     }
     private var isEmpty: Bool { habits.isEmpty }
-    private var allDoneToday: Bool { !habits.isEmpty && pendingHabits.isEmpty }
+    private var allDoneToday: Bool { !isFrozenToday && !habits.isEmpty && pendingHabits.isEmpty }
     private var isCompact: Bool { !isEmpty && !allDoneToday }
 
     var body: some View {
@@ -84,7 +88,8 @@ struct CenterPanel: View {
                         onToggle: onToggleHabit,
                         onDelete: onDeleteHabit,
                         clusters: clusters,
-                        stampNamespace: stampNamespace
+                        stampNamespace: stampNamespace,
+                        isFrozenToday: isFrozenToday
                     )
                     .padding(.top, 4)
                     .padding(.bottom, 60)

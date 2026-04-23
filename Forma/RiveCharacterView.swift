@@ -60,7 +60,11 @@ struct MentorCharacterView: View {
             // the top of Bruce's head.
             let visibleCharTop = characterHeight * 0.93
 
-            LoopingVideoView(videoName: "walk-bruce-01", isPlaying: walker.isWalking)
+            LoopingVideoView(
+                videoName: "walk-bruce-01",
+                isPlaying: walker.isWalking,
+                startOffset: walker.videoWalkStartOffset
+            )
                 .frame(width: charWidth, height: characterHeight)
                 .scaleEffect(x: walker.goingRight ? 1 : -1, y: 1, anchor: .center)
                 .contentShape(Rectangle())
@@ -391,7 +395,11 @@ struct MenteeCharacterView: View {
             let visibleCharTop = characterHeight * 0.55
 
             // Jazz — the orange lil-agent character
-            LoopingVideoView(videoName: "walk-jazz-01", isPlaying: walker.isWalking)
+            LoopingVideoView(
+                videoName: "walk-jazz-01",
+                isPlaying: walker.isWalking,
+                startOffset: walker.videoWalkStartOffset
+            )
                 .frame(width: charWidth, height: characterHeight)
                 .scaleEffect(x: walker.goingRight ? 1 : -1, y: 1, anchor: .center)
                 .contentShape(Rectangle())

@@ -31,6 +31,8 @@ struct SettingsPanel: View {
 
                 AccountActionsCard(backend: backend, showDeleteConfirm: $showDeleteConfirm)
 
+                EmailPreferencesCard(backend: backend)
+
                 SocialSummaryCard(metrics: metrics, dashboard: backend.dashboard)
 
                 SocialFeedCard(dashboard: backend.dashboard)
@@ -120,6 +122,59 @@ struct AccountActionsCard: View {
             shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
             level: .control
         )
+    }
+}
+
+/// Single-toggle email preferences tile. Today only the Sunday weekly report
+/// is gated by this flag — additional channels can be split into rows here as
+/// the backend grows new preference fields.
+struct EmailPreferencesCard: View {
+    @ObservedObject var backend: HabitBackendStore
+
+    private var isOn: Binding<Bool> {
+        Binding(
+            get: { backend.preferences?.emailOptIn ?? true },
+            set: { newValue in Task { await backend.setEmailOptIn(newValue) } }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            PanelTitle(systemImage: "envelope", title: "Email")
+
+            Toggle(isOn: isOn) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Weekly report")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Sunday recap of your consistency, perfect days, and best streak.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(MinimalToggleStyle())
+            .disabled(backend.preferencesRequestState.isLoading && backend.preferences == nil)
+
+            if case .failure(let message) = backend.preferencesRequestState {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
+        .task {
+            // Lazy-load on first appearance so the toggle reflects the
+            // server-side state without forcing a fetch on app launch.
+            if backend.preferences == nil {
+                await backend.loadPreferences()
+            }
+        }
     }
 }
 

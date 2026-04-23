@@ -258,9 +258,15 @@ private struct LevelCard: View {
                     .foregroundStyle(WidgetPalette.gold)
             }
             HStack(spacing: 6) {
-                Label("\(backend.freezesAvailable)", systemImage: "snowflake")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(WidgetPalette.cyan)
+                if backend.frozenToday {
+                    Label("Frozen", systemImage: "checkmark.shield.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(WidgetPalette.cyan)
+                } else {
+                    Label("\(backend.freezesAvailable)", systemImage: "snowflake")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(WidgetPalette.cyan)
+                }
                 Label("\(backend.checksToday)/\(backend.dailyCap)", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(WidgetPalette.success)

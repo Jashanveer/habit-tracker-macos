@@ -188,6 +188,15 @@ struct MatchStreamMessageReadEvent: Decodable {
     let at: String
 }
 
+// MARK: - UserPreferences
+
+/// Mirror of the `/api/users/me/preferences` payload. Today only the weekly
+/// report email is wired up; new toggles get added as fields, not flag maps,
+/// so the client stays strictly typed.
+struct UserPreferences: Codable, Equatable {
+    let emailOptIn: Bool
+}
+
 // MARK: - BackendAPIClient
 
 actor BackendAPIClient {
@@ -632,6 +641,23 @@ struct DeviceRepository {
     private struct EmptyResponse: Decodable {}
 }
 
+struct PreferencesRepository {
+    let client: BackendAPIClient
+
+    func get() async throws -> UserPreferences {
+        try await client.authorizedRequest(path: "/api/users/me/preferences", method: "GET")
+    }
+
+    func update(emailOptIn: Bool) async throws -> UserPreferences {
+        try await client.authorizedRequest(
+            path: "/api/users/me/preferences", method: "PUT",
+            body: PreferencesUpdateRequest(emailOptIn: emailOptIn)
+        )
+    }
+
+    private struct PreferencesUpdateRequest: Encodable { let emailOptIn: Bool }
+}
+
 struct AccountabilityRepository {
     let client: BackendAPIClient
 
@@ -678,6 +704,12 @@ struct AccountabilityRepository {
         try await client.authorizedRequest(
             path: "/api/accountability/streak-freeze/use", method: "POST",
             body: StreakFreezeRequest(dateKey: dateKey)
+        )
+    }
+
+    func undoStreakFreeze() async throws -> AccountabilityDashboard {
+        try await client.authorizedRequest(
+            path: "/api/accountability/streak-freeze/undo", method: "POST"
         )
     }
 

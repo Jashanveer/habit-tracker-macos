@@ -71,7 +71,11 @@ private struct XPLevelView: View {
                 }
 
                 HStack(spacing: 8) {
-                    CapsuleStat(icon: "snowflake", value: "\(backend.freezesAvailable)", tint: WidgetPalette.cyan)
+                    if backend.frozenToday {
+                        CapsuleStat(icon: "checkmark.shield.fill", value: "Frozen", tint: WidgetPalette.cyan)
+                    } else {
+                        CapsuleStat(icon: "snowflake", value: "\(backend.freezesAvailable)", tint: WidgetPalette.cyan)
+                    }
                     CapsuleStat(icon: "checkmark.circle.fill", value: "\(backend.checksToday)/\(backend.dailyCap)", tint: WidgetPalette.success)
                 }
             } else {

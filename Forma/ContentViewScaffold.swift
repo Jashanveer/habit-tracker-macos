@@ -37,10 +37,12 @@ struct ContentViewScaffold: View {
                 .zIndex(-1)
 
             DoneHabitPillsBackground(
-                habits: habits.filter {
-                    $0.completedDayKeys.contains(todayKey)
-                        && !stampStagingIds.contains($0.persistentModelID)
-                },
+                habits: (backend.dashboard?.rewards.frozenDates.contains(todayKey) ?? false)
+                    ? []
+                    : habits.filter {
+                        $0.completedDayKeys.contains(todayKey)
+                            && !stampStagingIds.contains($0.persistentModelID)
+                    },
                 todayKey: todayKey,
                 stampNamespace: stampNamespace
             )
@@ -55,6 +57,7 @@ struct ContentViewScaffold: View {
                 clusters: backend.dashboard?.habitClusters ?? [],
                 stampNamespace: stampNamespace,
                 stampStagingIds: stampStagingIds,
+                isFrozenToday: backend.dashboard?.rewards.frozenDates.contains(todayKey) ?? false,
                 onAddHabit: onAddHabit,
                 onToggleHabit: onToggleHabit,
                 onDeleteHabit: onDeleteHabit

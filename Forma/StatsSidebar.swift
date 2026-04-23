@@ -133,7 +133,8 @@ struct StatsSidebar: View {
                         rewards: rewards,
                         todayKey: todayKey,
                         isSyncing: backend.isSyncing,
-                        onUseFreeze: { await backend.useStreakFreeze(dateKey: todayKey) }
+                        onUseFreeze: { await backend.useStreakFreeze(dateKey: todayKey) },
+                        onUndoFreeze: { await backend.undoStreakFreeze() }
                     )
                 }
 
@@ -596,9 +597,15 @@ private struct StreakFreezeCard: View {
     let todayKey: String
     let isSyncing: Bool
     let onUseFreeze: () async -> Void
+    let onUndoFreeze: () async -> Void
+
+    @State private var pendingUndo: Bool = false
+    @State private var showUndoBanner: Bool = false
+    @State private var undoDismissTask: Task<Void, Never>?
 
     private var alreadyFrozenToday: Bool { rewards.frozenDates.contains(todayKey) }
     private var canUse: Bool { rewards.freezesAvailable > 0 && !alreadyFrozenToday }
+    private var hasTokens: Bool { rewards.freezesAvailable > 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -607,10 +614,10 @@ private struct StreakFreezeCard: View {
             HStack(alignment: .center, spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(Color.cyan.opacity(0.14))
+                        .fill(Color.cyan.opacity(hasTokens ? 0.14 : 0.08))
                     Image(systemName: "snowflake")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.cyan)
+                        .foregroundStyle(Color.cyan.opacity(hasTokens ? 1.0 : 0.55))
                 }
                 .frame(width: 48, height: 48)
                 .animation(.spring(response: 0.4, dampingFraction: 0.65), value: rewards.freezesAvailable)
@@ -625,13 +632,24 @@ private struct StreakFreezeCard: View {
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
-                    Text("earned from perfect weeks")
+                    Text("Complete every habit every day for a week to earn 1")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Streak freeze: \(rewards.freezesAvailable) \(rewards.freezesAvailable == 1 ? "token" : "tokens"). Earn one by completing every habit every day for a week. Never expires.")
+
+            HStack(spacing: 6) {
+                Image(systemName: "infinity")
+                    .font(.caption2.weight(.semibold))
+                Text("Never expires · use manually to protect today")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
 
             if !rewards.frozenDates.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
@@ -651,28 +669,11 @@ private struct StreakFreezeCard: View {
                 }
             }
 
-            if canUse || alreadyFrozenToday {
-                Button {
-                    Task { await onUseFreeze() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: alreadyFrozenToday ? "checkmark.shield.fill" : "shield.fill")
-                        Text(alreadyFrozenToday ? "Today is frozen" : "Use today")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(
-                        alreadyFrozenToday
-                            ? Color.cyan.opacity(0.18)
-                            : Color.cyan.opacity(0.82),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                    .foregroundStyle(alreadyFrozenToday ? Color.cyan : .white)
-                }
-                .buttonStyle(.plain)
-                .disabled(alreadyFrozenToday || isSyncing)
-                .animation(.spring(response: 0.3, dampingFraction: 0.75), value: alreadyFrozenToday)
+            actionArea
+
+            if showUndoBanner {
+                undoBanner
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .padding(14)
@@ -680,6 +681,123 @@ private struct StreakFreezeCard: View {
             shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
             level: .control
         )
+        .onChange(of: alreadyFrozenToday) { _, newValue in
+            guard pendingUndo else { return }
+            pendingUndo = false
+            if newValue { presentUndoBanner() }
+        }
+        .onDisappear {
+            undoDismissTask?.cancel()
+            undoDismissTask = nil
+        }
+    }
+
+    @ViewBuilder
+    private var actionArea: some View {
+        if alreadyFrozenToday {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.shield.fill")
+                Text("Today is frozen")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(
+                Color.cyan.opacity(0.18),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .foregroundStyle(Color.cyan)
+            .accessibilityLabel("Today is frozen")
+        } else if canUse {
+            Button {
+                pendingUndo = true
+                Task { await onUseFreeze() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "shield.fill")
+                    Text("Use today")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    Color.cyan.opacity(0.82),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(isSyncing)
+            .accessibilityLabel("Use a streak freeze to protect today")
+            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: canUse)
+        } else {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.cyan.opacity(0.8))
+                Text("0 tokens — finish a perfect week to earn your first freeze")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 9)
+            .padding(.horizontal, 10)
+            .background(
+                Color.cyan.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .accessibilityLabel("Zero tokens. Finish a perfect week to earn your first freeze.")
+        }
+    }
+
+    private var undoBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.shield.fill")
+                .foregroundStyle(Color.cyan)
+            Text("Today protected")
+                .font(.caption.weight(.semibold))
+            Spacer()
+            Button {
+                undoDismissTask?.cancel()
+                undoDismissTask = nil
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    showUndoBanner = false
+                }
+                Task { await onUndoFreeze() }
+            } label: {
+                Text("Undo")
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.cyan.opacity(0.18), in: Capsule())
+                    .foregroundStyle(Color.cyan)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Undo freeze")
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(
+            Color.cyan.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+    }
+
+    private func presentUndoBanner() {
+        undoDismissTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            showUndoBanner = true
+        }
+        undoDismissTask = Task {
+            try? await Task.sleep(for: .seconds(5))
+            if Task.isCancelled { return }
+            await MainActor.run {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    showUndoBanner = false
+                }
+            }
+        }
     }
 }
 

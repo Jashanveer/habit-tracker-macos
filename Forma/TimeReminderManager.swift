@@ -37,6 +37,79 @@ enum HabitReminderWindow: String, CaseIterable, Identifiable, Codable {
 @MainActor
 final class TimeReminderManager: ObservableObject {
     private let identifierPrefix = "time-reminder-"
+    private let streakEndingIdentifier = "streak-ending-soon"
+
+    /// Evening warning hour/minute for the streak-ending-soon nudge. Chosen
+    /// late enough that the user had a real chance to check in during the day,
+    /// early enough that a freeze is still a deliberate choice (not a panic
+    /// 11:59 tap).
+    private static let streakWarningHour = 21
+    private static let streakWarningMinute = 30
+
+    /// Schedules or cancels the single "streak ending soon — use a freeze"
+    /// warning for tonight. Conditions: user has a streak to protect, still
+    /// has incomplete habits today, owns at least one freeze, and hasn't
+    /// already frozen today. Requests notification authorization if the user
+    /// has never been asked.
+    func refreshStreakEndingReminder(
+        currentStreak: Int,
+        hasIncompleteHabits: Bool,
+        freezesAvailable: Int,
+        isFrozenToday: Bool
+    ) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [streakEndingIdentifier])
+
+        let shouldSchedule = currentStreak >= 1
+            && hasIncompleteHabits
+            && freezesAvailable >= 1
+            && !isFrozenToday
+        guard shouldSchedule else { return }
+
+        let now = Date()
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month, .day], from: now)
+        components.hour = Self.streakWarningHour
+        components.minute = Self.streakWarningMinute
+        guard let trigger = calendar.date(from: components),
+              trigger > now.addingTimeInterval(60) else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Streak ending soon"
+        content.body = "Your \(currentStreak)-day streak is at risk. Tap to use a freeze and keep it alive."
+        content.sound = .default
+
+        let triggerComponents = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: trigger)
+        let notificationTrigger = UNCalendarNotificationTrigger(dateMatching: triggerComponents, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: streakEndingIdentifier,
+            content: content,
+            trigger: notificationTrigger
+        )
+
+        requestAuthorizationIfNeeded { granted in
+            guard granted else { return }
+            center.add(request)
+        }
+    }
+
+    private func requestAuthorizationIfNeeded(completion: @escaping (Bool) -> Void) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                completion(true)
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+                    completion(granted)
+                }
+            case .denied:
+                completion(false)
+            @unknown default:
+                completion(false)
+            }
+        }
+    }
 
     func refreshReminders(for habits: [Habit], todayKey: String) {
         let center = UNUserNotificationCenter.current()

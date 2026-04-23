@@ -300,6 +300,8 @@ final class HabitBackendStore: ObservableObject {
     @Published private(set) var friendSearchResults: [AccountabilityDashboard.FriendSummary] = []
     @Published private(set) var streakFreezeRequestState: RequestState<Void>                   = .idle
     @Published private(set) var streamRequestState:      RequestState<Void>                    = .idle
+    @Published private(set) var preferencesRequestState: RequestState<UserPreferences>         = .idle
+    @Published private(set) var preferences:             UserPreferences?                       = nil
     @Published private(set) var liveMessagesByMatch:     [Int64: [AccountabilityDashboard.Message]] = [:]
 
     // MARK: Private
@@ -312,6 +314,7 @@ final class HabitBackendStore: ObservableObject {
     private let habitRepository: HabitRepository
     private let accountabilityRepository: AccountabilityRepository
     private let deviceRepository: DeviceRepository
+    private let preferencesRepository: PreferencesRepository
     /// Shared response cache; invalidated by any write that mutates the cached resource.
     let responseCache = ResponseCache()
     private var streamTask: Task<Void, Never>?
@@ -351,6 +354,7 @@ final class HabitBackendStore: ObservableObject {
         habitRepository           = HabitRepository(client: client)
         accountabilityRepository  = AccountabilityRepository(client: client)
         deviceRepository          = DeviceRepository(client: client)
+        preferencesRepository     = PreferencesRepository(client: client)
 
         isOnline = networkMonitor.isOnline
         networkCancellable = networkMonitor.$isOnline
@@ -815,6 +819,27 @@ final class HabitBackendStore: ObservableObject {
         refreshSyncingState()
     }
 
+    /// Reverts the most recent streak-freeze usage, provided the server is
+    /// still within its undo grace window. Paired with the 5-second undo
+    /// banner in `StreakFreezeCard`.
+    func undoStreakFreeze() async {
+        guard token != nil else { return }
+        streakFreezeRequestState = .loading; refreshSyncingState()
+        do {
+            let value = try await accountabilityRepository.undoStreakFreeze()
+            await syncSessionFromClient()
+            await responseCache.invalidateDashboard()
+            applyDashboardUpdate(value)
+            statusMessage = "Streak freeze undone"
+            errorMessage = nil
+            streakFreezeRequestState = .success(())
+        } catch {
+            handleAuthenticatedRequestError(error)
+            streakFreezeRequestState = .failure(error.localizedDescription)
+        }
+        refreshSyncingState()
+    }
+
     func registerDeviceToken(_ token: Data) async {
         guard isAuthenticated else { return }
         let hex = token.map { String(format: "%02.2hhx", $0) }.joined()
@@ -837,6 +862,40 @@ final class HabitBackendStore: ObservableObject {
             applyDashboardUpdate(value)
         } catch {
             handleAuthenticatedRequestError(error)
+        }
+    }
+
+    // MARK: - Preferences
+
+    func loadPreferences() async {
+        guard token != nil else { return }
+        preferencesRequestState = .loading
+        do {
+            let value = try await preferencesRepository.get()
+            preferences = value
+            preferencesRequestState = .success(value)
+        } catch {
+            handleAuthenticatedRequestError(error)
+            preferencesRequestState = .failure(error.localizedDescription)
+        }
+    }
+
+    /// Optimistically flips the local toggle, then syncs with the server. On
+    /// failure the previous value is restored so the UI never disagrees with
+    /// the persisted state.
+    func setEmailOptIn(_ enabled: Bool) async {
+        guard token != nil else { return }
+        let previous = preferences
+        preferences = UserPreferences(emailOptIn: enabled)
+        preferencesRequestState = .loading
+        do {
+            let value = try await preferencesRepository.update(emailOptIn: enabled)
+            preferences = value
+            preferencesRequestState = .success(value)
+        } catch {
+            preferences = previous
+            handleAuthenticatedRequestError(error)
+            preferencesRequestState = .failure(error.localizedDescription)
         }
     }
 
@@ -1011,6 +1070,8 @@ final class HabitBackendStore: ObservableObject {
         token = nil; dashboard = nil; liveMessagesByMatch = [:]
         WidgetSnapshotWriter.shared.clearBackendData()
         friendSearchResults = []
+        preferences = nil
+        preferencesRequestState = .idle
         lastSentMessageAt = nil; lastSentMessageText = nil
         statusMessage = nil; self.errorMessage = errorMessage
         justRegistered = false

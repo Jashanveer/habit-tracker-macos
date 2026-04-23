@@ -696,6 +696,7 @@ struct HabitListSection: View {
     let onDelete: (Habit) -> Void
     var clusters: [AccountabilityDashboard.HabitTimeCluster] = []
     var stampNamespace: Namespace.ID? = nil
+    var isFrozenToday: Bool = false
 
     private var doneCount: Int {
         habits.filter { $0.completedDayKeys.contains(todayKey) }.count
@@ -711,9 +712,15 @@ struct HabitListSection: View {
                 Text("Today's list")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("\(doneCount)/\(habits.count) done")
-                    .font(.caption2.weight(.medium).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if isFrozenToday {
+                    Label("Frozen", systemImage: "snowflake")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.cyan)
+                } else {
+                    Text("\(doneCount)/\(habits.count) done")
+                        .font(.caption2.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: 560)
             .padding(.horizontal, 4)
@@ -726,7 +733,8 @@ struct HabitListSection: View {
                         onToggle: onToggle,
                         onDelete: onDelete,
                         cluster: cluster(for: habit),
-                        stampNamespace: stampNamespace
+                        stampNamespace: stampNamespace,
+                        isFrozen: isFrozenToday
                     )
                 }
             }
@@ -799,6 +807,10 @@ struct HabitCard: View {
     let onDelete: (Habit) -> Void
     var cluster: AccountabilityDashboard.HabitTimeCluster? = nil
     var stampNamespace: Namespace.ID? = nil
+    /// Today is protected by a streak freeze. Overrides the normal check state
+    /// visually (icy-blue, snowflake) without mutating the underlying
+    /// `completedDayKeys` — local metrics remain the source of truth.
+    var isFrozen: Bool = false
 
     @State private var isHovered = false
     @State private var showArchiveConfirm = false
@@ -810,17 +822,22 @@ struct HabitCard: View {
         case .task:  return habit.isTaskCompleted
         }
     }
+    private var effectiveDone: Bool { isFrozen || doneToday }
     private var isHabitEntry: Bool { habit.entryType == .habit }
     private var isOverdue: Bool { habit.isOverdue() }
     private var currentStreak: Int { HabitMetrics.currentStreak(for: habit.completedDayKeys, endingAt: todayKey) }
     private var bestStreak: Int { HabitMetrics.bestStreak(for: habit.completedDayKeys) }
     private var recentDays: [DayInfo] { DateKey.recentDays(count: 7) }
     private var completionTint: Color {
+        if isFrozen { return Color.cyan }
         if isHabitEntry { return CleanShotTheme.success }
         return isOverdue ? CleanShotTheme.danger : CleanShotTheme.accent
     }
     private var cardTint: Color {
         let opacity = colorScheme == .dark ? 0.10 : 0.07
+        if isFrozen {
+            return Color.cyan.opacity(opacity + 0.02)
+        }
         switch habit.entryType {
         case .task:
             return (isOverdue ? CleanShotTheme.danger : CleanShotTheme.accent).opacity(opacity)
@@ -836,23 +853,38 @@ struct HabitCard: View {
     var body: some View {
         HStack(spacing: 10) {
             Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                     onToggle(habit)
                 }
             } label: {
-                Image(systemName: doneToday ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(doneToday ? completionTint : .secondary.opacity(0.6))
-                    .contentTransition(.symbolEffect(.replace.downUp))
+                ZStack {
+                    Circle()
+                        .fill(effectiveDone ? completionTint.opacity(0.16) : Color.clear)
+                    Circle()
+                        .strokeBorder(
+                            effectiveDone ? Color.clear : Color.secondary.opacity(0.32),
+                            lineWidth: 1.5
+                        )
+                    if effectiveDone {
+                        Image(systemName: isFrozen ? "snowflake" : "checkmark")
+                            .font(.system(size: isFrozen ? 12 : 11, weight: .bold))
+                            .foregroundStyle(completionTint)
+                            .contentTransition(.symbolEffect(.replace.downUp))
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(isFrozen ? "Frozen" : (doneToday ? "Done" : "Not done"))
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(habit.title)
                         .font(.system(size: 14, weight: .medium))
-                        .strikethrough(doneToday)
-                        .foregroundStyle(doneToday ? .secondary : .primary)
+                        .strikethrough(effectiveDone)
+                        .foregroundStyle(effectiveDone ? .secondary : .primary)
                         .lineLimit(1)
                     if isHabitEntry, let cluster, cluster.sampleSize >= 3 {
                         HabitClusterBadge(timeSlot: cluster.timeSlot)

@@ -38,18 +38,26 @@ struct ContentView: View {
     private var todayKey: String { DateKey.key(for: Date()) }
     private var metrics: HabitMetrics { HabitMetrics.compute(for: habits, todayKey: todayKey) }
 
+    /// True only when the main dashboard is the foreground view — no overlay
+    /// panels (progress / settings / calendar / onboarding) are covering it.
+    /// Bruce and the rival mentee live strictly on this dashboard so they
+    /// don't peek out from behind the side panels or calendar sheet.
+    private var isDashboardForeground: Bool {
+        !showOnboarding && !progressOpen && !settingsOpen && !calendarOpen
+    }
+
     // AI mentor is always on once the user is signed in — but only on the
-    // dashboard. The onboarding overlay covers the dashboard, so suppress
-    // Bruce while it's up so he doesn't peek out from behind the cover.
+    // dashboard. Any overlay (onboarding, stats sidebar, settings, calendar)
+    // suppresses Bruce so he doesn't peek out from behind the cover.
     private var showMentorCharacter: Bool {
-        backend.isAuthenticated && !showOnboarding
+        backend.isAuthenticated && isDashboardForeground
     }
 
     // Mentee slot surfaces a top-leaderboard friend — only shown when the
-    // user has at least one friend on the leaderboard. Same onboarding gate
-    // as Bruce so the orange character doesn't appear over the welcome flow.
+    // user has at least one friend on the leaderboard. Same dashboard-only
+    // gate as Bruce so the orange character doesn't appear over any panel.
     private var showMenteeCharacter: Bool {
-        guard backend.isAuthenticated, !showOnboarding else { return false }
+        guard backend.isAuthenticated, isDashboardForeground else { return false }
         let friendCount = backend.dashboard?.social?.friendCount ?? 0
         let leaderboard = backend.dashboard?.weeklyChallenge.leaderboard ?? []
         return friendCount > 0 && !leaderboard.isEmpty
@@ -458,45 +466,32 @@ struct ContentView: View {
 
     /// Overdue tasks stay on the list and continue to block new task creation
     /// until the user finishes them. The first time a task crosses its due
-    /// date we apply a one-shot penalty: spend a streak freeze if any are
-    /// available, otherwise dock local XP. The `overduePenaltyApplied` flag on
-    /// `Habit` guarantees we never penalise the same task twice.
+    /// date we dock local XP. Streak freezes are never spent automatically —
+    /// the user must tap "Use today" in the StreakFreezeCard to protect a day.
     private func handleOverdueTasks() {
         let unpenalised = habits.filter {
             $0.entryType == .task && $0.isOverdue() && !$0.overduePenaltyApplied
         }
         guard !unpenalised.isEmpty else { return }
 
-        var freezesUsed = 0
         var xpDocked = 0
         let userId = backend.currentUserId
 
         for task in unpenalised {
             task.overduePenaltyApplied = true
             task.updatedAt = Date()
-
-            let availableFreezes = (backend.dashboard?.rewards.freezesAvailable ?? 0) - freezesUsed
-            if availableFreezes > 0 {
-                freezesUsed += 1
-                let dueKey = task.dueAt.map { DateKey.key(for: $0) } ?? todayKey
-                Task { await backend.useStreakFreeze(dateKey: dueKey) }
-            } else {
-                xpDocked += OverduePenaltyStore.xpPerOverdueTask
-                OverduePenaltyStore.add(OverduePenaltyStore.xpPerOverdueTask, for: userId)
-            }
+            xpDocked += OverduePenaltyStore.xpPerOverdueTask
+            OverduePenaltyStore.add(OverduePenaltyStore.xpPerOverdueTask, for: userId)
         }
 
         saveAndRefreshWidgets()
 
         let count = unpenalised.count
         let noun = count == 1 ? "task" : "tasks"
-        if xpDocked > 0 && freezesUsed > 0 {
-            backend.statusMessage = "\(count) overdue \(noun) — \(freezesUsed) freeze used, -\(xpDocked) XP. Finish them to unblock new tasks."
-        } else if freezesUsed > 0 {
-            backend.statusMessage = "\(count) overdue \(noun) — \(freezesUsed) streak \(freezesUsed == 1 ? "freeze" : "freezes") spent. Finish them to unblock new tasks."
-        } else {
-            backend.statusMessage = "\(count) overdue \(noun) — -\(xpDocked) XP. Finish them to unblock new tasks."
-        }
+        let freezeHint = (backend.dashboard?.rewards.freezesAvailable ?? 0) > 0
+            ? " Tap the freeze card to protect today."
+            : ""
+        backend.statusMessage = "\(count) overdue \(noun) — -\(xpDocked) XP. Finish them to unblock new tasks.\(freezeHint)"
     }
 
     // MARK: - Archive habits / delete tasks
@@ -642,9 +637,22 @@ struct ContentView: View {
     }
 
     private func refreshTimeReminders() {
+        let habitEntries = habits.filter { $0.entryType == .habit }
         timeReminderManager.refreshReminders(
-            for: habits.filter { $0.entryType == .habit },
+            for: habitEntries,
             todayKey: todayKey
+        )
+
+        let activeHabits = habitEntries.filter { !$0.isArchived }
+        let hasIncompleteHabits = activeHabits.contains { !$0.completedDayKeys.contains(todayKey) }
+        let freezes = backend.dashboard?.rewards.freezesAvailable ?? 0
+        let isFrozen = backend.dashboard?.rewards.frozenDates.contains(todayKey) ?? false
+
+        timeReminderManager.refreshStreakEndingReminder(
+            currentStreak: metrics.currentPerfectStreak,
+            hasIncompleteHabits: hasIncompleteHabits,
+            freezesAvailable: freezes,
+            isFrozenToday: isFrozen
         )
     }
 

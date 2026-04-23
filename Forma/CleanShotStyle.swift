@@ -194,3 +194,41 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// Minimal capsule toggle that mirrors the app's card/chip language: soft
+/// low-opacity tinted track when on, thin-stroked empty track when off, with a
+/// spring-animated knob. Use via `.toggleStyle(MinimalToggleStyle())`.
+struct MinimalToggleStyle: ToggleStyle {
+    var tint: Color = CleanShotTheme.violet
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            configuration.label
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                Capsule()
+                    .fill(configuration.isOn ? tint.opacity(0.22) : Color.secondary.opacity(0.16))
+                Circle()
+                    .fill(configuration.isOn ? tint : Color.secondary.opacity(0.55))
+                    .padding(2.5)
+            }
+            .frame(width: 42, height: 24)
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        configuration.isOn ? Color.clear : Color.secondary.opacity(0.24),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(Capsule())
+            .onTapGesture {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                    configuration.isOn.toggle()
+                }
+            }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(configuration.isOn ? "On" : "Off")
+        }
+    }
+}
+
