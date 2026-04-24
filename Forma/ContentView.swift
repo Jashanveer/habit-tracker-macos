@@ -373,6 +373,16 @@ struct ContentView: View {
                 local.createdAt = remote.localCreatedAt
             }
             local.completedDayKeys  = remote.completedDayKeys
+            // Server-wins on verification metadata too — but only when the
+            // server actually carries a value. `canonicalKey == nil` from a
+            // pre-V13 backend means "unknown", not "clear" (legacy servers
+            // omit the field), so we preserve any local selection in that
+            // case rather than wiping user intent on every sync.
+            if let canonicalKey = remote.canonicalKey { local.canonicalKey = canonicalKey }
+            if let tier = remote.verificationTier { local.verificationTierRaw = tier }
+            if remote.verificationSource != nil { local.verificationSourceRaw = remote.verificationSource }
+            if let param = remote.verificationParam { local.verificationParam = param }
+            if let target = remote.weeklyTarget { local.weeklyTarget = target }
             local.syncStatus        = .synced
             local.updatedAt         = Date()
         }
@@ -384,7 +394,12 @@ struct ContentView: View {
                 completedDayKeys: remote.completedDayKeys,
                 backendId: remote.id,
                 syncStatus: .synced,
-                reminderWindow: remote.reminderWindow
+                reminderWindow: remote.reminderWindow,
+                verificationTier: remote.verificationTier.flatMap(VerificationTier.init(rawValue:)) ?? .selfReport,
+                verificationSource: remote.verificationSource.flatMap(VerificationSource.init(rawValue:)),
+                verificationParam: remote.verificationParam,
+                canonicalKey: remote.canonicalKey,
+                weeklyTarget: remote.weeklyTarget
             ))
         }
         for habit in result.toDelete {

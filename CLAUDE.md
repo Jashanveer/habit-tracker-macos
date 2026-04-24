@@ -100,9 +100,14 @@ SwiftData stores lightweight-migrate silently):
   frequency habits count rest days up to their `(7 - weeklyTarget)` budget
   and only imperfect thereafter
 
-**Backend integration (Phase 2) is pending** — the client persists all
-verification fields locally but does not yet round-trip them through
-`POST /api/habits` or `POST /api/habits/{id}/verify`.
+**Backend round-trip (Phase 2)** — shipped for the minimum viable slice:
+V13 migration adds the columns, `HabitService` persists/returns them,
+`HabitCheck` carries the tier/source that corroborated each check, and
+`LeaderboardEntry` reserves a `verifiedScore` int (currently always 0).
+Tier-weighted leaderboard scoring (auto × 10, partial × 5, self × 1) and
+a server-side canonical-registry validator are still follow-ups — both
+require AccountabilityService surgery that was out of scope for the
+initial pass.
 
 ## MCP Tools: code-review-graph
 
