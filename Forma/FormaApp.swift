@@ -6,7 +6,23 @@ import UserNotifications
 struct FormaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    var sharedModelContainer: ModelContainer = {
+    /// Single shared container — created once at static-init time so both
+    /// the SwiftUI scene's `.modelContainer` modifier AND the auto-verifier
+    /// bootstrap (called from `init` below) reference the exact same store.
+    private static let sharedModelContainer: ModelContainer = makeSharedContainer()
+
+    init() {
+        // Bootstrap the auto-verification coordinator with the shared
+        // model container so HKObserverQuery wake-ups + background
+        // delivery work even when the OS launches the app into the
+        // background to deliver a new HealthKit sample. App.init runs on
+        // the main actor in SwiftUI; assumeIsolated documents that.
+        MainActor.assumeIsolated {
+            AutoVerificationCoordinator.shared.bootstrap(container: Self.sharedModelContainer)
+        }
+    }
+
+    private static func makeSharedContainer() -> ModelContainer {
         let schema = Schema([Habit.self, HabitCompletion.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -30,15 +46,15 @@ struct FormaApp: App {
         } catch {
             fatalError("Could not create ModelContainer even after store reset: \(error)")
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .frame(minWidth: 900, minHeight: 600)
-                .task { WidgetSnapshotWriter.shared.start(container: sharedModelContainer) }
+                .task { WidgetSnapshotWriter.shared.start(container: Self.sharedModelContainer) }
         }
-        .modelContainer(sharedModelContainer)
+        .modelContainer(Self.sharedModelContainer)
         .defaultSize(width: 1080, height: 720)
         .windowResizability(.contentMinSize)
     }

@@ -13,11 +13,22 @@ import SwiftData
 /// Manual overrides record the completion at `.selfReport` tier so the
 /// leaderboard's anti-cheat cost is preserved.
 ///
-/// Single instance, MainActor-isolated. Configure once from the root view
-/// with the active `HabitBackendStore` + `ModelContext`, then drive scans
-/// from:
+/// Single instance, MainActor-isolated. Two configuration entry points:
+///
+///   1. `bootstrap(container:)` — called from the App's init with the
+///      shared `ModelContainer`. Registers the long-running HKObserver
+///      queries AND enables HealthKit background delivery so the OS
+///      can wake the app when new samples arrive even if Forma is
+///      fully closed. Backend is unset here.
+///
+///   2. `configure(backend:modelContext:)` — called from `ContentView`
+///      once the user is authenticated. Adds the backend reference so
+///      auto-checks fire `setCheck` over the wire, and re-binds the
+///      model context to the live one used by the UI.
+///
+/// Scans run on:
 ///   - app appear / sync completion (explicit `scan(habits:)` calls)
-///   - HKObserverQuery wakeups while the app is foregrounded
+///   - HKObserverQuery wakeups (foreground OR background launch)
 ///   - scenePhase transitions to `.active`
 @MainActor
 final class AutoVerificationCoordinator {
@@ -29,15 +40,33 @@ final class AutoVerificationCoordinator {
     private var hkObservers: [HKQuery] = []
     private weak var backend: HabitBackendStore?
     private weak var modelContext: ModelContext?
+    /// Fallback path to the model store when the OS background-launches
+    /// the app for an HK observer wake-up before any UI hands us a live
+    /// `modelContext`. Held strongly because the App struct (which owns
+    /// the container) outlives this singleton in practice anyway.
+    private var container: ModelContainer?
     private var isObserving = false
 
     private init() {}
 
-    /// Wires up the coordinator with the running backend store + model
-    /// context, and starts the HealthKit observer queries on first call.
-    /// Idempotent: subsequent calls just refresh the references — observers
-    /// are kept active across the app's lifetime so a foreground app
-    /// reacts to new HK samples within seconds.
+    /// First-thing setup called from the App struct's init with the shared
+    /// `ModelContainer`. Registers long-running HKObserver queries and
+    /// enables HealthKit's background-delivery channel so the OS wakes
+    /// the app process whenever a relevant sample arrives — even if the
+    /// app is fully closed when the user's watch logs a workout.
+    /// Idempotent: subsequent calls are no-ops once observing.
+    func bootstrap(container: ModelContainer) {
+        self.container = container
+        if !isObserving {
+            startObservers()
+            isObserving = true
+        }
+    }
+
+    /// Wires the live backend store + UI's model context once the user
+    /// is signed in. Idempotent: safe to call on every appear. Will also
+    /// kick off observer registration if `bootstrap` somehow didn't run
+    /// first (e.g. legacy launch path).
     func configure(backend: HabitBackendStore, modelContext: ModelContext) {
         self.backend = backend
         self.modelContext = modelContext
@@ -86,8 +115,9 @@ final class AutoVerificationCoordinator {
             verifiedBySource: .selfReport,
             awardedTier: .selfReport
         )
-        modelContext?.insert(completion)
-        try? modelContext?.save()
+        let writeContext = activeContext()
+        writeContext?.insert(completion)
+        try? writeContext?.save()
 
         guard let bid = backendId, let store = backend, store.isAuthenticated else { return }
         Task {
@@ -100,7 +130,7 @@ final class AutoVerificationCoordinator {
                     verificationSource: VerificationSource.selfReport.rawValue
                 )
                 habit.syncStatus = .synced
-                try? modelContext?.save()
+                try? activeContext()?.save()
             } catch {
                 habit.syncStatus = .failed
             }
@@ -133,9 +163,14 @@ final class AutoVerificationCoordinator {
         habit.completedDayKeys.append(dayKey)
         habit.updatedAt = Date()
         habit.syncStatus = .pending
-        modelContext?.insert(completion)
-        try? modelContext?.save()
+        let writeContext = activeContext()
+        writeContext?.insert(completion)
+        try? writeContext?.save()
 
+        // No backend yet (background-launch path before the user has
+        // logged in, or pre-auth state). The local write is enough; the
+        // next `flushOutbox` pass will replay the new dayKey to the
+        // server because syncStatus is `.pending`.
         guard let bid = backendId, let store = backend, store.isAuthenticated else { return }
         Task {
             do {
@@ -147,7 +182,7 @@ final class AutoVerificationCoordinator {
                     verificationSource: source.rawValue
                 )
                 habit.syncStatus = .synced
-                try? modelContext?.save()
+                try? activeContext()?.save()
             } catch {
                 habit.syncStatus = .failed
             }
@@ -155,10 +190,15 @@ final class AutoVerificationCoordinator {
     }
 
     /// Registers a long-running `HKObserverQuery` for every sample type
-    /// any verifiable canonical habit could query against. The observer
-    /// fires on the main actor whenever a relevant sample is added — we
-    /// rescan all habits at that point so a workout logged in the Fitness
-    /// app shows up as a check within seconds while the user is in Forma.
+    /// any verifiable canonical habit could query against AND turns on
+    /// HealthKit background delivery so the OS wakes the app whenever
+    /// new data lands — even if Forma was fully closed at the time.
+    ///
+    /// Background delivery has zero entitlement cost beyond the regular
+    /// HealthKit grant the user already gave at onboarding. The trade-off
+    /// is some battery — the app gets relaunched into the background for
+    /// each batch of new samples — but Apple throttles this aggressively
+    /// so impact is minimal.
     private func startObservers() {
         guard HKHealthStore.isHealthDataAvailable() else { return }
 
@@ -179,11 +219,20 @@ final class AutoVerificationCoordinator {
                 guard let self else { completionHandler(); return }
                 Task { @MainActor in
                     await self.scanFromObserver()
+                    // CRITICAL: must call within ~30s or HK throttles future
+                    // wake-ups for this observer. The scan is cheap so we're
+                    // well inside the window.
                     completionHandler()
                 }
             }
             store.execute(query)
             hkObservers.append(query)
+
+            // Ask HealthKit to relaunch the app whenever new data arrives.
+            // `.immediate` is the most aggressive cadence; HK still batches
+            // and throttles in practice. Failures are silent — typically
+            // means the user hasn't authorized this type yet.
+            store.enableBackgroundDelivery(for: type, frequency: .immediate) { _, _ in }
         }
     }
 
@@ -192,11 +241,20 @@ final class AutoVerificationCoordinator {
     /// caller's habit list at that point, so we go straight to the model
     /// context. The fetch is cheap (a handful of rows).
     private func scanFromObserver() async {
-        guard let ctx = modelContext else { return }
+        guard let ctx = activeContext() else { return }
         let descriptor = FetchDescriptor<Habit>(
             predicate: #Predicate<Habit> { !$0.isArchived }
         )
         let habits = (try? ctx.fetch(descriptor)) ?? []
         await scan(habits: habits)
+    }
+
+    /// Picks the live model context if the UI has one, otherwise falls
+    /// back to the bootstrapped container's main context. Background
+    /// launches go through the latter path because no view has appeared
+    /// to hand us its `@Environment(\.modelContext)` yet.
+    private func activeContext() -> ModelContext? {
+        if let live = modelContext { return live }
+        return container?.mainContext
     }
 }
