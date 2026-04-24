@@ -274,9 +274,19 @@ struct ContentView: View {
                 let remote: BackendHabit
                 switch habit.entryType {
                 case .habit:
+                    // Forward the verification metadata so onboarding-
+                    // staged habits keep their canonical mapping when
+                    // they finally upload. Without this, "morning run"
+                    // created during a flaky-network onboarding would
+                    // sync to the server as a plain self-report habit.
                     remote = try await backend.createHabit(
                         title: habit.title,
-                        reminderWindow: habit.reminderWindow
+                        reminderWindow: habit.reminderWindow,
+                        canonicalKey: habit.canonicalKey,
+                        verificationTier: habit.verificationTierRaw,
+                        verificationSource: habit.verificationSourceRaw,
+                        verificationParam: habit.verificationParam,
+                        weeklyTarget: habit.weeklyTarget
                     )
                 case .task:
                     remote = try await backend.createTask(title: habit.title)
@@ -686,7 +696,21 @@ struct ContentView: View {
             let key = Habit.duplicateMatchKey(trimmed)
             guard !seen.contains(key) else { continue }
             seen.insert(key)
-            let habit = Habit(title: trimmed, entryType: .habit, syncStatus: .pending)
+            // Run the canonical matcher so onboarding-staged titles like
+            // "morning run" land on the dashboard already wired up for
+            // HealthKit verification — without this, the habit shows up
+            // as a plain manual-toggle entry and the user has to delete
+            // and re-add it via AddHabitBar to get the verify path.
+            let canonical = CanonicalHabits.match(userTitle: trimmed)
+            let habit = Habit(
+                title: trimmed,
+                entryType: .habit,
+                syncStatus: .pending,
+                verificationTier: canonical?.tier ?? .selfReport,
+                verificationSource: canonical?.source,
+                verificationParam: canonical?.param,
+                canonicalKey: canonical?.key
+            )
             modelContext.insert(habit)
         }
         UserDefaults.standard.set(true, forKey: onboardingKey)

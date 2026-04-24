@@ -481,6 +481,34 @@ final class HabitBackendStore: ObservableObject {
         refreshSyncingState()
     }
 
+    /// Sign in with Apple. The caller (AuthViews) hands us the verified
+    /// identityToken from `ASAuthorizationAppleIDCredential` plus the
+    /// optional name Apple returns on first sign-in. Backend handles the
+    /// rest — verifying the token, linking or creating the account, and
+    /// returning the same JWT pair as password login.
+    func signInWithApple(identityToken: String, displayName: String?) async {
+        authRequestState = .loading; refreshSyncingState()
+        do {
+            let session = try await authRepository.signInWithApple(
+                identityToken: identityToken,
+                displayName: displayName
+            )
+            applySession(session)
+            statusMessage = nil
+            errorMessage = nil
+            authRequestState = .success(())
+            // First-time Apple sign-in registers the account fresh — make
+            // the onboarding overview reappear so the user sees the
+            // permissions step rather than landing cold on an empty
+            // dashboard.
+            justRegistered = true
+        } catch {
+            errorMessage = error.localizedDescription
+            authRequestState = .failure(error.localizedDescription)
+        }
+        refreshSyncingState()
+    }
+
     func requestEmailVerification(email: String) async {
         authRequestState = .loading; refreshSyncingState()
         do {

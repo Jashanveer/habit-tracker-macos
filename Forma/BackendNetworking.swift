@@ -224,6 +224,18 @@ actor BackendAPIClient {
         let s = BackendSession.fromAuthTokens(tokens); session = s; return s
     }
 
+    /// Sign in with Apple — exchanges Apple's identity token for Forma's
+    /// own JWT pair. The backend verifies the token against Apple's JWKS,
+    /// then either looks up the linked account or provisions a new one
+    /// from the embedded email (only sent on the first authorization).
+    func appleLogin(identityToken: String, displayName: String?) async throws -> BackendSession {
+        let tokens: BackendAuthTokens = try await request(
+            path: "/api/auth/apple", method: "POST",
+            body: AppleLoginRequest(identityToken: identityToken, displayName: displayName)
+        )
+        let s = BackendSession.fromAuthTokens(tokens); session = s; return s
+    }
+
     func requestEmailVerification(email: String) async throws {
         let _: MessageResponse = try await request(
             path: "/api/auth/email-verification", method: "POST",
@@ -447,6 +459,7 @@ actor BackendAPIClient {
     private struct EmailVerificationRequest: Encodable { let email: String }
     private struct RegisterRequest: Encodable { let username, email, password, avatarUrl, verificationCode: String }
     private struct RefreshRequest:  Encodable { let refreshToken: String }
+    private struct AppleLoginRequest: Encodable { let identityToken: String; let displayName: String? }
     private struct LogoutRequest:   Encodable { let refreshToken: String }
     private struct MessageResponse: Decodable { let message: String }
     private struct ApiErrorResponse: Decodable { let message: String }
@@ -460,6 +473,10 @@ struct AuthRepository {
 
     func signIn(username: String, password: String) async throws -> BackendSession {
         try await client.login(username: username, password: password)
+    }
+
+    func signInWithApple(identityToken: String, displayName: String?) async throws -> BackendSession {
+        try await client.appleLogin(identityToken: identityToken, displayName: displayName)
     }
 
     func requestEmailVerification(email: String) async throws {

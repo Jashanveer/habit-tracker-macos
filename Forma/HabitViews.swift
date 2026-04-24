@@ -49,8 +49,10 @@ struct AddHabitBar: View {
     @State private var showSocialAppsPicker = false
     #endif
 
-    /// Frequency-picker options shown on the confirmation card. nil = daily.
-    private static let frequencyOptions: [Int?] = [nil, 3, 5, 7]
+    /// Frequency-picker options shown on the confirmation card. nil =
+    /// daily; 7 isn't offered because it's the same commitment as Daily
+    /// and would just confuse the perfect-day rest-budget math.
+    private static let frequencyOptions: [Int?] = [nil, 3, 5]
 
     struct PendingHabitAdd: Equatable {
         let title: String

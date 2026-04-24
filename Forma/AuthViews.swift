@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 
 // MARK: - App icon motion
@@ -580,6 +581,30 @@ struct AuthGateView: View {
             .disabled(backend.isSyncing)
             .padding(.top, 14)
 
+            // OR divider + Sign in with Apple. Apple's HIG requires the
+            // button to appear on every screen offering competing sign-in
+            // methods, with comparable size + prominence to the primary
+            // option above.
+            HStack(spacing: 10) {
+                Rectangle().fill(.secondary.opacity(0.25)).frame(height: 0.5)
+                Text("or").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                Rectangle().fill(.secondary.opacity(0.25)).frame(height: 0.5)
+            }
+            .padding(.top, 14)
+
+            SignInWithAppleButton(
+                mode == .signIn ? .signIn : .signUp,
+                onRequest: { request in
+                    request.requestedScopes = [.fullName, .email]
+                },
+                onCompletion: { result in
+                    Task { await handleAppleAuthorization(result) }
+                }
+            )
+            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+            .frame(height: 42)
+            .disabled(backend.isSyncing)
+
             if mode == .signUp && isVerificationCodeSent {
                 Button("Resend code", action: resendVerificationCode)
                     .buttonStyle(.plain)
@@ -809,6 +834,43 @@ struct AuthGateView: View {
                 )
             }
 
+            if backend.isAuthenticated {
+                onAuthenticated()
+            }
+        }
+    }
+
+    /// Handles the result of Apple's authorization sheet. On success we
+    /// pass the verified identityToken straight to the backend, which
+    /// validates it against Apple's JWKS and either links or provisions
+    /// the account. Cancellations are silent — the user already signaled
+    /// "no, not now" by dismissing the sheet, no error toast needed.
+    private func handleAppleAuthorization(_ result: Result<ASAuthorization, Error>) async {
+        switch result {
+        case .failure(let error):
+            // ASAuthorizationError.canceled isn't a real failure — user
+            // dismissed the sheet. Anything else (network, account
+            // unavailable) deserves a visible error.
+            if let asError = error as? ASAuthorizationError, asError.code == .canceled {
+                return
+            }
+            backend.errorMessage = "Apple sign-in failed: \(error.localizedDescription)"
+            return
+        case .success(let auth):
+            guard let credential = auth.credential as? ASAuthorizationAppleIDCredential,
+                  let tokenData = credential.identityToken,
+                  let token = String(data: tokenData, encoding: .utf8)
+            else {
+                backend.errorMessage = "Apple didn't return an identity token"
+                return
+            }
+            let displayName: String? = {
+                guard let components = credential.fullName else { return nil }
+                let formatter = PersonNameComponentsFormatter()
+                let formatted = formatter.string(from: components).trimmingCharacters(in: .whitespaces)
+                return formatted.isEmpty ? nil : formatted
+            }()
+            await backend.signInWithApple(identityToken: token, displayName: displayName)
             if backend.isAuthenticated {
                 onAuthenticated()
             }
