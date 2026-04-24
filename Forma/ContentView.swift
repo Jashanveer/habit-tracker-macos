@@ -190,7 +190,12 @@ struct ContentView: View {
                 case .habit:
                     remoteHabit = try await backend.createHabit(
                         title: title,
-                        reminderWindow: localHabit.reminderWindow
+                        reminderWindow: localHabit.reminderWindow,
+                        canonicalKey: localHabit.canonicalKey,
+                        verificationTier: localHabit.verificationTierRaw,
+                        verificationSource: localHabit.verificationSourceRaw,
+                        verificationParam: localHabit.verificationParam,
+                        weeklyTarget: localHabit.weeklyTarget
                     )
                 case .task:
                     remoteHabit = try await backend.createTask(title: title)
@@ -452,11 +457,22 @@ struct ContentView: View {
         refreshTimeReminders()
 
         guard let backendId = habit.backendId, backend.isAuthenticated else { return }
+        let habitTierRaw = habit.verificationTierRaw
+        let habitSourceRaw = habit.verificationSourceRaw
         Task {
             do {
                 switch habit.entryType {
                 case .habit:
-                    try await backend.setCheck(habitID: backendId, dateKey: todayKey, done: wasUnchecked)
+                    // Only forward verification metadata on done→true
+                    // transitions so toggling off doesn't overwrite the
+                    // historical tier captured on the first check.
+                    try await backend.setCheck(
+                        habitID: backendId,
+                        dateKey: todayKey,
+                        done: wasUnchecked,
+                        verificationTier: wasUnchecked ? habitTierRaw : nil,
+                        verificationSource: wasUnchecked ? habitSourceRaw : nil
+                    )
                 case .task:
                     try await backend.setTaskCheck(taskID: backendId, dateKey: todayKey, done: wasUnchecked)
                 }

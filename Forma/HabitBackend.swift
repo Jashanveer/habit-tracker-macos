@@ -9,6 +9,14 @@ struct BackendHabit: Decodable, Identifiable {
     let checksByDate: [String: Bool]
     let entryType: HabitEntryType
     let createdAt: Date?
+    /// Verification metadata round-tripped through `/api/habits`. All nil
+    /// when the server row is pre-Verification or the client didn't supply
+    /// any on create. Matches the Swift `Habit.canonicalKey` / tier / etc.
+    let canonicalKey: String?
+    let verificationTier: String?
+    let verificationSource: String?
+    let verificationParam: Double?
+    let weeklyTarget: Int?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -16,6 +24,11 @@ struct BackendHabit: Decodable, Identifiable {
         case reminderWindow
         case checksByDate
         case createdAt
+        case canonicalKey
+        case verificationTier
+        case verificationSource
+        case verificationParam
+        case weeklyTarget
     }
 
     init(from decoder: Decoder) throws {
@@ -25,6 +38,11 @@ struct BackendHabit: Decodable, Identifiable {
         reminderWindow = try container.decodeIfPresent(String.self, forKey: .reminderWindow)
         checksByDate = try container.decode([String: Bool].self, forKey: .checksByDate)
         createdAt = Self.decodeDateIfPresent(from: container, forKey: .createdAt)
+        canonicalKey = try container.decodeIfPresent(String.self, forKey: .canonicalKey)
+        verificationTier = try container.decodeIfPresent(String.self, forKey: .verificationTier)
+        verificationSource = try container.decodeIfPresent(String.self, forKey: .verificationSource)
+        verificationParam = try container.decodeIfPresent(Double.self, forKey: .verificationParam)
+        weeklyTarget = try container.decodeIfPresent(Int.self, forKey: .weeklyTarget)
         entryType = .habit
     }
 
@@ -34,7 +52,12 @@ struct BackendHabit: Decodable, Identifiable {
         checksByDate: [String: Bool],
         reminderWindow: String? = nil,
         entryType: HabitEntryType = .habit,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        canonicalKey: String? = nil,
+        verificationTier: String? = nil,
+        verificationSource: String? = nil,
+        verificationParam: Double? = nil,
+        weeklyTarget: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -42,6 +65,11 @@ struct BackendHabit: Decodable, Identifiable {
         self.checksByDate = checksByDate
         self.entryType = entryType
         self.createdAt = createdAt
+        self.canonicalKey = canonicalKey
+        self.verificationTier = verificationTier
+        self.verificationSource = verificationSource
+        self.verificationParam = verificationParam
+        self.weeklyTarget = weeklyTarget
     }
 
     var completedDayKeys: [String] {
@@ -216,7 +244,26 @@ struct AccountabilityDashboard: Decodable {
     }
     struct LeaderboardEntry: Decodable, Identifiable {
         var id: String { "\(displayName)-\(score)-\(currentUser)" }
-        let displayName: String; let score: Int; let currentUser: Bool
+        let displayName: String
+        let score: Int
+        let currentUser: Bool
+        /// Tier-weighted score from the server (auto × 10, partial × 5,
+        /// self × 1). 0 when the backend hasn't enabled the weighted pass
+        /// yet — older builds send no `verifiedScore` key at all, so the
+        /// decodeIfPresent default keeps the UI safe across versions.
+        let verifiedScore: Int
+
+        private enum CodingKeys: String, CodingKey {
+            case displayName, score, currentUser, verifiedScore
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            displayName = try c.decode(String.self, forKey: .displayName)
+            score = try c.decode(Int.self, forKey: .score)
+            currentUser = try c.decode(Bool.self, forKey: .currentUser)
+            verifiedScore = try c.decodeIfPresent(Int.self, forKey: .verifiedScore) ?? 0
+        }
     }
     struct SocialPost: Decodable, Identifiable {
         let id: Int64; let author: String; let message: String; let createdAt: String
@@ -544,10 +591,26 @@ final class HabitBackendStore: ObservableObject {
         }
     }
 
-    func createHabit(title: String, reminderWindow: String? = nil) async throws -> BackendHabit {
+    func createHabit(
+        title: String,
+        reminderWindow: String? = nil,
+        canonicalKey: String? = nil,
+        verificationTier: String? = nil,
+        verificationSource: String? = nil,
+        verificationParam: Double? = nil,
+        weeklyTarget: Int? = nil
+    ) async throws -> BackendHabit {
         createHabitRequestState = .loading; refreshSyncingState()
         do {
-            let habit = try await habitRepository.createHabit(title: title, reminderWindow: reminderWindow)
+            let habit = try await habitRepository.createHabit(
+                title: title,
+                reminderWindow: reminderWindow,
+                canonicalKey: canonicalKey,
+                verificationTier: verificationTier,
+                verificationSource: verificationSource,
+                verificationParam: verificationParam,
+                weeklyTarget: weeklyTarget
+            )
             await syncSessionFromClient()
             await responseCache.invalidateHabits()   // force re-fetch on next list
             createHabitRequestState = .success(habit)
@@ -580,13 +643,27 @@ final class HabitBackendStore: ObservableObject {
         }
     }
 
-    func updateHabit(habitID: Int64, title: String, reminderWindow: String?) async throws -> BackendHabit {
+    func updateHabit(
+        habitID: Int64,
+        title: String,
+        reminderWindow: String?,
+        canonicalKey: String? = nil,
+        verificationTier: String? = nil,
+        verificationSource: String? = nil,
+        verificationParam: Double? = nil,
+        weeklyTarget: Int? = nil
+    ) async throws -> BackendHabit {
         updateHabitRequestState = .loading; refreshSyncingState()
         do {
             let habit = try await habitRepository.updateHabit(
                 habitID: habitID,
                 title: title,
-                reminderWindow: reminderWindow
+                reminderWindow: reminderWindow,
+                canonicalKey: canonicalKey,
+                verificationTier: verificationTier,
+                verificationSource: verificationSource,
+                verificationParam: verificationParam,
+                weeklyTarget: weeklyTarget
             )
             await syncSessionFromClient()
             await responseCache.invalidateHabits()
@@ -620,10 +697,20 @@ final class HabitBackendStore: ObservableObject {
         }
     }
 
-    func setCheck(habitID: Int64, dateKey: String, done: Bool) async throws {
+    func setCheck(
+        habitID: Int64,
+        dateKey: String,
+        done: Bool,
+        verificationTier: String? = nil,
+        verificationSource: String? = nil
+    ) async throws {
         checkUpdateRequestState = .loading; refreshSyncingState()
         do {
-            _ = try await habitRepository.setCheck(habitID: habitID, dateKey: dateKey, done: done)
+            _ = try await habitRepository.setCheck(
+                habitID: habitID, dateKey: dateKey, done: done,
+                verificationTier: verificationTier,
+                verificationSource: verificationSource
+            )
             await syncSessionFromClient()
             await responseCache.invalidateHabits()
             await responseCache.invalidateDashboard()

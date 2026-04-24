@@ -514,11 +514,27 @@ struct HabitRepository {
         }
     }
 
-    func createHabit(title: String, reminderWindow: String?) async throws -> BackendHabit {
+    func createHabit(
+        title: String,
+        reminderWindow: String?,
+        canonicalKey: String? = nil,
+        verificationTier: String? = nil,
+        verificationSource: String? = nil,
+        verificationParam: Double? = nil,
+        weeklyTarget: Int? = nil
+    ) async throws -> BackendHabit {
         let habit: BackendHabit = try await client.authorizedRequest(
             path: "/api/habits",
             method: "POST",
-            body: HabitWriteRequest(title: title, reminderWindow: reminderWindow)
+            body: HabitWriteRequest(
+                title: title,
+                reminderWindow: reminderWindow,
+                canonicalKey: canonicalKey,
+                verificationTier: verificationTier,
+                verificationSource: verificationSource,
+                verificationParam: verificationParam,
+                weeklyTarget: weeklyTarget
+            )
         )
         return BackendHabit(
             id: habit.id,
@@ -526,7 +542,12 @@ struct HabitRepository {
             checksByDate: habit.checksByDate,
             reminderWindow: habit.reminderWindow,
             entryType: .habit,
-            createdAt: habit.createdAt
+            createdAt: habit.createdAt,
+            canonicalKey: habit.canonicalKey,
+            verificationTier: habit.verificationTier,
+            verificationSource: habit.verificationSource,
+            verificationParam: habit.verificationParam,
+            weeklyTarget: habit.weeklyTarget
         )
     }
 
@@ -546,11 +567,28 @@ struct HabitRepository {
         )
     }
 
-    func updateHabit(habitID: Int64, title: String, reminderWindow: String?) async throws -> BackendHabit {
+    func updateHabit(
+        habitID: Int64,
+        title: String,
+        reminderWindow: String?,
+        canonicalKey: String? = nil,
+        verificationTier: String? = nil,
+        verificationSource: String? = nil,
+        verificationParam: Double? = nil,
+        weeklyTarget: Int? = nil
+    ) async throws -> BackendHabit {
         let habit: BackendHabit = try await client.authorizedRequest(
             path: "/api/habits/\(habitID)",
             method: "PUT",
-            body: HabitWriteRequest(title: title, reminderWindow: reminderWindow)
+            body: HabitWriteRequest(
+                title: title,
+                reminderWindow: reminderWindow,
+                canonicalKey: canonicalKey,
+                verificationTier: verificationTier,
+                verificationSource: verificationSource,
+                verificationParam: verificationParam,
+                weeklyTarget: weeklyTarget
+            )
         )
         return BackendHabit(
             id: habit.id,
@@ -558,7 +596,12 @@ struct HabitRepository {
             checksByDate: habit.checksByDate,
             reminderWindow: habit.reminderWindow,
             entryType: .habit,
-            createdAt: habit.createdAt
+            createdAt: habit.createdAt,
+            canonicalKey: habit.canonicalKey,
+            verificationTier: habit.verificationTier,
+            verificationSource: habit.verificationSource,
+            verificationParam: habit.verificationParam,
+            weeklyTarget: habit.weeklyTarget
         )
     }
 
@@ -578,11 +621,21 @@ struct HabitRepository {
         )
     }
 
-    func setCheck(habitID: Int64, dateKey: String, done: Bool) async throws -> BackendHabit {
+    func setCheck(
+        habitID: Int64,
+        dateKey: String,
+        done: Bool,
+        verificationTier: String? = nil,
+        verificationSource: String? = nil
+    ) async throws -> BackendHabit {
         let habit: BackendHabit = try await client.authorizedRequest(
             path: "/api/habits/\(habitID)/checks/\(dateKey)",
             method: "PUT",
-            body: CheckUpdateRequest(done: done)
+            body: CheckUpdateRequest(
+                done: done,
+                verificationTier: verificationTier,
+                verificationSource: verificationSource
+            )
         )
         return BackendHabit(
             id: habit.id,
@@ -590,15 +643,22 @@ struct HabitRepository {
             checksByDate: habit.checksByDate,
             reminderWindow: habit.reminderWindow,
             entryType: .habit,
-            createdAt: habit.createdAt
+            createdAt: habit.createdAt,
+            canonicalKey: habit.canonicalKey,
+            verificationTier: habit.verificationTier,
+            verificationSource: habit.verificationSource,
+            verificationParam: habit.verificationParam,
+            weeklyTarget: habit.weeklyTarget
         )
     }
 
     func setTaskCheck(taskID: Int64, dateKey: String, done: Bool) async throws -> BackendHabit {
+        // Tasks never carry verification metadata — pass explicit nils to
+        // keep the `CheckUpdateRequest` payload shape uniform.
         let task: BackendHabit = try await client.authorizedRequest(
             path: "/api/tasks/\(taskID)/checks/\(dateKey)",
             method: "PUT",
-            body: CheckUpdateRequest(done: done)
+            body: CheckUpdateRequest(done: done, verificationTier: nil, verificationSource: nil)
         )
         return BackendHabit(
             id: task.id,
@@ -621,9 +681,18 @@ struct HabitRepository {
     private struct HabitWriteRequest: Encodable {
         let title: String
         let reminderWindow: String?
+        let canonicalKey: String?
+        let verificationTier: String?
+        let verificationSource: String?
+        let verificationParam: Double?
+        let weeklyTarget: Int?
     }
     private struct TaskWriteRequest: Encodable { let title: String }
-    private struct CheckUpdateRequest:  Encodable { let done: Bool }
+    private struct CheckUpdateRequest: Encodable {
+        let done: Bool
+        let verificationTier: String?
+        let verificationSource: String?
+    }
     private struct EmptyResponse: Decodable {}
 }
 
