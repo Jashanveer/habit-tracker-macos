@@ -70,10 +70,14 @@ struct HabitMetrics {
     let levelNote: String
 
     static func compute(for habits: [Habit], todayKey: String) -> HabitMetrics {
+        // Weekly-target habits whose target is already met for the current
+        // ISO week are treated as "done for the week" — they drop out of
+        // today's active entry count so the progress ring doesn't punish
+        // the user for days after they've already met the commitment.
         let todayEntries = habits.filter { isEntryActive($0, on: todayKey) }
         let totalHabits = todayEntries.count
         let totalChecks = habits.reduce(0) { $0 + Set($1.completedDayKeys).count }
-        let doneToday = todayEntries.filter { $0.completedDayKeys.contains(todayKey) }.count
+        let doneToday = todayEntries.filter { $0.isSatisfied(on: todayKey) }.count
         let progressToday = totalHabits > 0 ? Double(doneToday) / Double(totalHabits) : 0
         let perfectDays = perfectDayKeys(for: habits)
         let bestPerfectStreak = bestStreak(for: perfectDays)
@@ -133,8 +137,11 @@ struct HabitMetrics {
         let onlyHabits = habits.filter { $0.entryType == .habit }
         guard !onlyHabits.isEmpty else { return 0 }
         let recentKeys = DateKey.recentDays(count: 7, endingAt: DateKey.date(from: todayKey)).map(\.key)
+        // Use `isSatisfied` so weekly-target habits contribute rest-day
+        // credit (up to their `7 - weeklyTarget` budget) rather than being
+        // counted as incomplete on days the user deliberately rested.
         let completed = recentKeys.reduce(0) { total, key in
-            total + onlyHabits.filter { $0.completedDayKeys.contains(key) }.count
+            total + onlyHabits.filter { $0.isSatisfied(on: key) }.count
         }
         return min(Double(completed) / Double(onlyHabits.count * recentKeys.count), 1)
     }
@@ -243,13 +250,24 @@ struct HabitMetrics {
     static func perfectDayKeys(for habits: [Habit]) -> [String] {
         guard !habits.isEmpty else { return [] }
 
-        let allKeys = Set(habits.flatMap(\.completedDayKeys))
+        // Any day that either carries at least one completion OR is covered
+        // by a weekly-target habit's rest budget is eligible to be a
+        // perfect day. Combining both avoids a subtle miss where the user
+        // only logs gym days but still wants rest days in the same week to
+        // count once the budget math checks out.
+        let completionDays = Set(habits.flatMap(\.completedDayKeys))
+        let restDays = habits
+            .filter { $0.isFrequencyBased }
+            .flatMap { habit -> [String] in
+                habit.completedDayKeys.flatMap { Habit.weekKeys(containing: DateKey.date(from: $0)) }
+            }
+        let candidateKeys = completionDays.union(restDays)
 
-        return allKeys
+        return candidateKeys
             .filter { key in
                 let activeEntries = habits.filter { isEntryActive($0, on: key) }
                 guard !activeEntries.isEmpty else { return false }
-                return activeEntries.allSatisfy { $0.completedDayKeys.contains(key) }
+                return activeEntries.allSatisfy { $0.isSatisfied(on: key) }
             }
             .sorted()
     }

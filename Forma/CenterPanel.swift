@@ -24,7 +24,15 @@ struct CenterPanel: View {
 
     private var pendingHabits: [Habit] {
         if isFrozenToday { return habits }
+        let today = DateKey.date(from: todayKey)
         return habits.filter { habit in
+            // Weekly-target habits disappear from today's list the moment
+            // the user meets their commitment for the ISO week — they stay
+            // gone until the week rolls over, then reappear automatically
+            // because `weeklyTargetReached` resets on a new week.
+            if habit.isFrequencyBased && habit.weeklyTargetReached(containing: today) {
+                return stampStagingIds.contains(habit.persistentModelID)
+            }
             let isDone: Bool = {
                 switch habit.entryType {
                 case .habit: return habit.completedDayKeys.contains(todayKey)

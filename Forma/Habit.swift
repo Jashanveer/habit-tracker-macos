@@ -132,6 +132,21 @@ final class Habit {
     /// match any canonical alias.
     var canonicalKey: String? = nil
 
+    /// Target number of completions per ISO week for frequency-based habits
+    /// (e.g. "gym 5× per week"). `nil` — legacy daily behavior, one check
+    /// per day. Once the target is met for the current week the habit is
+    /// hidden from the main list and surfaces as a background stamp until
+    /// the next ISO week begins. Tasks ignore this field.
+    var weeklyTarget: Int? = nil
+
+    /// Stable per-record UUID that `HabitCompletion.habitLocalId` references
+    /// so evidence records can be reconciled back to their parent habit
+    /// before the first sync round-trip assigns `backendId`. Optional so
+    /// SwiftData's lightweight migration path can fill pre-Verification
+    /// rows with nil — callers use `ensureLocalUUID()` to seed one on
+    /// first use without racing migration.
+    var localUUID: UUID? = nil
+
     /// Backward-compatible entry kind accessor.
     /// Older stores may contain missing/invalid values; those fall back to `.habit`.
     var entryType: HabitEntryType {
@@ -174,7 +189,9 @@ final class Habit {
         verificationTier: VerificationTier = .selfReport,
         verificationSource: VerificationSource? = nil,
         verificationParam: Double? = nil,
-        canonicalKey: String? = nil
+        canonicalKey: String? = nil,
+        weeklyTarget: Int? = nil,
+        localUUID: UUID? = UUID()
     ) {
         self.title = title
         self.entryTypeRawValue = entryType.rawValue
@@ -193,6 +210,8 @@ final class Habit {
         self.verificationSourceRaw = verificationSource?.rawValue
         self.verificationParam = verificationParam
         self.canonicalKey = canonicalKey
+        self.weeklyTarget = weeklyTarget
+        self.localUUID = localUUID
     }
 
     // MARK: - Convenience
@@ -209,6 +228,101 @@ final class Habit {
         guard entryType == .task, !isTaskCompleted, let due = dueAt else { return false }
         let calendar = Calendar.current
         return calendar.startOfDay(for: due) < calendar.startOfDay(for: now)
+    }
+
+    // MARK: - Weekly target & verification helpers
+
+    /// True only for habits (not tasks) that the user has committed to as
+    /// "N times per ISO week" rather than the default daily cadence.
+    var isFrequencyBased: Bool {
+        entryType == .habit && (weeklyTarget ?? 0) > 0
+    }
+
+    /// Returns this habit's stable local UUID, lazily seeding one the first
+    /// time a pre-Verification record is touched. Must be called from a
+    /// write-capable context (e.g. inside a SwiftData `ModelContext` that
+    /// will later `save()`).
+    @discardableResult
+    func ensureLocalUUID() -> UUID {
+        if let existing = localUUID { return existing }
+        let fresh = UUID()
+        localUUID = fresh
+        return fresh
+    }
+
+    /// Count of completions inside the ISO week that contains `referenceDate`.
+    /// Used by both the weekly-target gating (hide from list once met) and
+    /// the rest-budget math in perfect-day scoring.
+    func completionsInWeek(containing referenceDate: Date) -> Int {
+        let keys = Self.weekKeys(containing: referenceDate)
+        let completed = Set(completedDayKeys)
+        return keys.reduce(0) { $0 + (completed.contains($1) ? 1 : 0) }
+    }
+
+    /// True once the user has logged at least `weeklyTarget` completions in
+    /// the ISO week containing `referenceDate`. False for non-frequency
+    /// habits, tasks, and habits with a nil or non-positive target.
+    func weeklyTargetReached(containing referenceDate: Date) -> Bool {
+        guard isFrequencyBased, let target = weeklyTarget else { return false }
+        return completionsInWeek(containing: referenceDate) >= target
+    }
+
+    /// Whether this habit counts as "satisfied" on the calendar day keyed
+    /// by `dayKey` for perfect-day scoring.
+    ///
+    /// Daily habits / tasks: satisfied iff the user actually completed
+    /// them that day — existing behavior, unchanged.
+    ///
+    /// Weekly-target habits: satisfied if either (a) the user logged a
+    /// completion on `dayKey`, OR (b) `dayKey` fits within the week's
+    /// rest budget (`7 - weeklyTarget` non-completion days counted in
+    /// chronological order). For a 5×/week target with one gym visit,
+    /// the first 2 non-gym days of the week count as perfect rest; any
+    /// additional non-gym day is a missed commitment and imperfect.
+    func isSatisfied(on dayKey: String) -> Bool {
+        let completed = completedDayKeys.contains(dayKey)
+        guard isFrequencyBased, let target = weeklyTarget else {
+            return completed
+        }
+        if completed { return true }
+
+        let referenceDate = DateKey.date(from: dayKey)
+        let weekDayKeys = Self.weekKeys(containing: referenceDate)
+        let restBudget = max(0, 7 - target)
+        let completedSet = Set(completedDayKeys)
+
+        var restUsed = 0
+        for key in weekDayKeys {
+            if completedSet.contains(key) { continue }
+            restUsed += 1
+            if key == dayKey {
+                return restUsed <= restBudget
+            }
+        }
+        return false
+    }
+
+    /// All seven day keys for the ISO week containing `referenceDate`,
+    /// Monday-first and in chronological order. Exposed at the type level
+    /// so `HabitMetrics` and the UI filters share one notion of "the week".
+    static func weekKeys(containing referenceDate: Date) -> [String] {
+        let cal = isoWeekCalendar
+        let start = cal.dateInterval(of: .weekOfYear, for: referenceDate)?.start
+            ?? cal.startOfDay(for: referenceDate)
+        return (0..<7).compactMap { offset in
+            cal.date(byAdding: .day, value: offset, to: start).map(DateKey.key(for:))
+        }
+    }
+
+    /// ISO-8601 calendar (Monday-starts-week, min 4 days in first week) so
+    /// client and backend weekly scoring agree on which days belong to
+    /// which week across timezones.
+    private static var isoWeekCalendar: Calendar {
+        var cal = Calendar(identifier: .iso8601)
+        cal.timeZone = TimeZone.current
+        cal.firstWeekday = 2
+        cal.minimumDaysInFirstWeek = 4
+        return cal
     }
 
     // MARK: - Duplicate detection

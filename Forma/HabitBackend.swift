@@ -677,10 +677,14 @@ final class HabitBackendStore: ObservableObject {
         let backendId = habit.backendId
         let tier = habit.verificationTier
         let param = habit.verificationParam
+        // Seed a stable UUID on the habit the first time we verify it so
+        // evidence records can be reconciled to this habit before its
+        // backendId exists. On subsequent calls we return the same UUID.
+        let localId = habit.ensureLocalUUID()
 
         let completion = await VerificationService.shared.verify(
             habitBackendId: backendId,
-            habitLocalId: UUID(),
+            habitLocalId: localId,
             source: source,
             tier: tier,
             param: param,

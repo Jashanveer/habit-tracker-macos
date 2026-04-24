@@ -39,9 +39,15 @@ struct ContentViewScaffold: View {
             DoneHabitPillsBackground(
                 habits: (backend.dashboard?.rewards.frozenDates.contains(todayKey) ?? false)
                     ? []
-                    : habits.filter {
-                        $0.completedDayKeys.contains(todayKey)
-                            && !stampStagingIds.contains($0.persistentModelID)
+                    : habits.filter { habit in
+                        guard !stampStagingIds.contains(habit.persistentModelID) else { return false }
+                        // Weekly-target habits surface as stamps for the
+                        // remainder of the week once their target is met,
+                        // regardless of whether today itself was a gym day.
+                        if habit.isFrequencyBased {
+                            return habit.weeklyTargetReached(containing: DateKey.date(from: todayKey))
+                        }
+                        return habit.completedDayKeys.contains(todayKey)
                     },
                 todayKey: todayKey,
                 stampNamespace: stampNamespace
