@@ -49,9 +49,13 @@ struct FormaApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Wire up the delegate but don't request authorization at launch —
+        // onboarding's permissions step owns the prompt so the user sees
+        // *why* before being asked. Refresh the APNs device token here
+        // for users who already granted in a prior run.
         UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            guard granted else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else { return }
             DispatchQueue.main.async {
                 NSApp.registerForRemoteNotifications()
             }
