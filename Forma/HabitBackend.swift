@@ -1434,6 +1434,7 @@ final class HabitBackendStore: ObservableObject {
 
     private func clearSession(errorMessage: String? = nil) {
         stopStream()
+        stopUserStream()
         token = nil; dashboard = nil; liveMessagesByMatch = [:]
         WidgetSnapshotWriter.shared.clearBackendData()
         friendSearchResults = []
@@ -1442,6 +1443,7 @@ final class HabitBackendStore: ObservableObject {
         lastSentMessageAt = nil; lastSentMessageText = nil
         statusMessage = nil; self.errorMessage = errorMessage
         justRegistered = false
+        requiresProfileSetup = false
         KeychainSessionStore.delete()
         UserDefaults.standard.removeObject(forKey: Self.legacySessionKey)
         UserDefaults.standard.removeObject(forKey: Self.legacyTokenKey)
