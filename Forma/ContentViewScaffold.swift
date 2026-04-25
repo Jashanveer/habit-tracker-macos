@@ -221,7 +221,18 @@ struct ContentViewScaffold: View {
                 .padding(.trailing, 20)
         }
         .overlay {
-            if showOnboarding {
+            // Profile setup wins over normal onboarding — a fresh Apple
+            // sign-up needs a username + avatar before anything else.
+            if backend.requiresProfileSetup {
+                AppleProfileSetupView(backend: backend) {
+                    // Setup committed; flag is already cleared by the
+                    // store. UI naturally falls through to OnboardingView
+                    // on the next render because requiresProfileSetup is
+                    // false now.
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .zIndex(195)
+            } else if showOnboarding {
                 OnboardingView(onComplete: onCompleteOnboarding)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                     .zIndex(190)

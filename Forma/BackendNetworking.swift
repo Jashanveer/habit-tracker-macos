@@ -115,6 +115,11 @@ struct BackendSession: Codable {
     let accessToken: String
     let refreshToken: String?
     let accessTokenExpiresAt: Date
+    /// Carried through from the auth response — true only when the
+    /// session was just minted via a fresh Apple sign-up. Consumed once
+    /// by the client to gate the post-Apple profile-setup screen, then
+    /// effectively ignored for the rest of the session lifecycle.
+    var isNewUser: Bool = false
 
     nonisolated var isAccessTokenExpired: Bool {
         accessTokenExpiresAt <= Date().addingTimeInterval(30)
@@ -127,7 +132,8 @@ struct BackendSession: Codable {
         return BackendSession(
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
-            accessTokenExpiresAt: expiresAt
+            accessTokenExpiresAt: expiresAt,
+            isNewUser: tokens.isNewUser
         )
     }
 
@@ -135,7 +141,8 @@ struct BackendSession: Codable {
         BackendSession(
             accessToken: token,
             refreshToken: nil,
-            accessTokenExpiresAt: JWTTokenInspector.expirationDate(for: token) ?? Date(timeIntervalSinceNow: 120)
+            accessTokenExpiresAt: JWTTokenInspector.expirationDate(for: token) ?? Date(timeIntervalSinceNow: 120),
+            isNewUser: false
         )
     }
 }
@@ -166,9 +173,14 @@ struct BackendAuthTokens: Decodable {
     let accessToken: String
     let refreshToken: String?
     let accessTokenExpiresAtEpochSeconds: Int64?
+    /// True only on the first-time Sign in with Apple path. Drives the
+    /// post-Apple profile-setup screen (username + avatar) before the
+    /// user lands on the dashboard. Default false so password
+    /// register/login / refresh stay unchanged.
+    let isNewUser: Bool
 
     private enum CodingKeys: String, CodingKey {
-        case accessToken, refreshToken, accessTokenExpiresAtEpochSeconds, token
+        case accessToken, refreshToken, accessTokenExpiresAtEpochSeconds, token, isNewUser
     }
 
     init(from decoder: Decoder) throws {
@@ -177,6 +189,7 @@ struct BackendAuthTokens: Decodable {
             ?? c.decode(String.self, forKey: .token)
         refreshToken = try c.decodeIfPresent(String.self, forKey: .refreshToken)
         accessTokenExpiresAtEpochSeconds = try c.decodeIfPresent(Int64.self, forKey: .accessTokenExpiresAtEpochSeconds)
+        isNewUser = try c.decodeIfPresent(Bool.self, forKey: .isNewUser) ?? false
     }
 }
 
@@ -234,6 +247,29 @@ actor BackendAPIClient {
             body: AppleLoginRequest(identityToken: identityToken, displayName: displayName)
         )
         let s = BackendSession.fromAuthTokens(tokens); session = s; return s
+    }
+
+    /// Live availability probe used by the profile-setup screen so users
+    /// see "username taken" inline rather than only on submit.
+    func isUsernameAvailable(_ username: String) async throws -> Bool {
+        let trimmed = username.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
+        let response: UsernameAvailabilityResponse = try await authorizedRequest(
+            path: "/api/users/me/username-available?username=\(encoded)",
+            method: "GET"
+        )
+        return response.available
+    }
+
+    /// One-time post-Apple-signup setup — submits the chosen username +
+    /// avatar URL. Backend persists, returns the refreshed MeResponse
+    /// the caller doesn't need (we just care that it succeeded).
+    func setupProfile(username: String, avatarURL: String) async throws {
+        let _: MeResponse = try await authorizedRequest(
+            path: "/api/users/me/setup-profile", method: "POST",
+            body: ProfileSetupRequest(username: username, avatarUrl: avatarURL)
+        )
     }
 
     func requestEmailVerification(email: String) async throws {
@@ -460,6 +496,9 @@ actor BackendAPIClient {
     private struct RegisterRequest: Encodable { let username, email, password, avatarUrl, verificationCode: String }
     private struct RefreshRequest:  Encodable { let refreshToken: String }
     private struct AppleLoginRequest: Encodable { let identityToken: String; let displayName: String? }
+    private struct ProfileSetupRequest: Encodable { let username: String; let avatarUrl: String }
+    private struct UsernameAvailabilityResponse: Decodable { let available: Bool }
+    private struct MeResponse: Decodable { let userId: Int64?; let email: String?; let username: String? }
     private struct LogoutRequest:   Encodable { let refreshToken: String }
     private struct MessageResponse: Decodable { let message: String }
     private struct ApiErrorResponse: Decodable { let message: String }
@@ -477,6 +516,14 @@ struct AuthRepository {
 
     func signInWithApple(identityToken: String, displayName: String?) async throws -> BackendSession {
         try await client.appleLogin(identityToken: identityToken, displayName: displayName)
+    }
+
+    func isUsernameAvailable(_ username: String) async throws -> Bool {
+        try await client.isUsernameAvailable(username)
+    }
+
+    func setupProfile(username: String, avatarURL: String) async throws {
+        try await client.setupProfile(username: username, avatarURL: avatarURL)
     }
 
     func requestEmailVerification(email: String) async throws {

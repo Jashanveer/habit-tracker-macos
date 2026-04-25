@@ -328,6 +328,11 @@ final class HabitBackendStore: ObservableObject {
     /// onboarding overview to appear regardless of any stale UserDefaults
     /// onboarded_<userId> key. UI should reset this to false after consuming.
     @Published var justRegistered: Bool = false
+    /// True when the active session was just minted by a fresh Apple
+    /// sign-up — the UI overlays an `AppleProfileSetupView` to collect a
+    /// public username + avatar before letting the dashboard render.
+    /// Cleared by `setupAppleProfile` on success.
+    @Published var requiresProfileSetup: Bool = false
     /// Mirrors `NWPathMonitor`. False while the device has no route to the
     /// backend; the UI uses this to hide network-failure toasts and to trigger
     /// a full sync on the next reconnection.
@@ -497,16 +502,51 @@ final class HabitBackendStore: ObservableObject {
             statusMessage = nil
             errorMessage = nil
             authRequestState = .success(())
-            // First-time Apple sign-in registers the account fresh — make
-            // the onboarding overview reappear so the user sees the
-            // permissions step rather than landing cold on an empty
-            // dashboard.
-            justRegistered = true
+            if session.isNewUser {
+                // Brand-new Apple account — show the profile-setup screen
+                // first so the user picks a public username + avatar
+                // before landing on the dashboard.
+                requiresProfileSetup = true
+                justRegistered = true
+            } else {
+                requiresProfileSetup = false
+            }
         } catch {
             errorMessage = error.localizedDescription
             authRequestState = .failure(error.localizedDescription)
         }
         refreshSyncingState()
+    }
+
+    /// Submits the user's chosen username + avatar to the backend after
+    /// a fresh Apple sign-up. Clears `requiresProfileSetup` on success so
+    /// the UI can hand off to the regular onboarding flow.
+    func setupAppleProfile(username: String, avatarURL: String) async -> Bool {
+        authRequestState = .loading; refreshSyncingState()
+        defer { refreshSyncingState() }
+        do {
+            try await authRepository.setupProfile(username: username, avatarURL: avatarURL)
+            requiresProfileSetup = false
+            errorMessage = nil
+            authRequestState = .success(())
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            authRequestState = .failure(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Live availability probe used by the profile-setup screen so the
+    /// "this is taken" feedback is in front of the user before they tap
+    /// Continue. Falls back to `true` on transient network errors so a
+    /// flaky connection doesn't permanently block the screen.
+    func isUsernameAvailable(_ username: String) async -> Bool {
+        do {
+            return try await authRepository.isUsernameAvailable(username)
+        } catch {
+            return true
+        }
     }
 
     func requestEmailVerification(email: String) async {
