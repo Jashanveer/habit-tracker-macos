@@ -31,6 +31,8 @@ struct SettingsPanel: View {
 
                 AccountActionsCard(backend: backend, showDeleteConfirm: $showDeleteConfirm)
 
+                VerificationHelpCard()
+
                 EmailPreferencesCard(backend: backend)
 
                 SocialSummaryCard(metrics: metrics, dashboard: backend.dashboard)
@@ -122,6 +124,55 @@ struct AccountActionsCard: View {
             shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
             level: .control
         )
+    }
+}
+
+/// Surfaces the same `VerificationHelpSheet` that's reachable from
+/// onboarding, so users who skipped onboarding (or want a refresher
+/// later) can still see which habits auto-verify and what their
+/// leaderboard-tier weights are.
+struct VerificationHelpCard: View {
+    @State private var showSheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            PanelTitle(systemImage: "checkmark.shield.fill", title: "Verification")
+            Text("Which habits auto-verify against Apple Health, which stay honor-system, and how the leaderboard weighs them.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("How verification works")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(CleanShotTheme.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .cleanShotSurface(
+                shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+                level: .control
+            )
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
+        .sheet(isPresented: $showSheet) {
+            VerificationHelpSheet()
+        }
     }
 }
 
