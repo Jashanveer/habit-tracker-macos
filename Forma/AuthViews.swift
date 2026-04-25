@@ -514,6 +514,22 @@ struct AuthGateView: View {
             tabSwitcher
                 .padding(.bottom, 16)
 
+            // Apple-first: prominent SignInWithAppleButton sits above the
+            // email/password form so users default to the one-tap path.
+            // Email login stays available as a secondary fallback below.
+            appleSignInButton
+
+            HStack(spacing: 10) {
+                Rectangle().fill(.secondary.opacity(0.20)).frame(height: 0.5)
+                Text("or use email")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+                    .kerning(0.5)
+                Rectangle().fill(.secondary.opacity(0.20)).frame(height: 0.5)
+            }
+            .padding(.vertical, 10)
+
             VStack(spacing: 10) {
                 authInput(placeholder: "Username", text: $username, isSecure: false)
                     .onSubmit { submit() }
@@ -572,38 +588,14 @@ struct AuthGateView: View {
                             .tint(.white)
                     }
                     Text(primaryActionTitle)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 42)
+                .frame(height: 38)
             }
             .buttonStyle(GradientPrimaryButtonStyle())
             .disabled(backend.isSyncing)
-            .padding(.top, 14)
-
-            // OR divider + Sign in with Apple. Apple's HIG requires the
-            // button to appear on every screen offering competing sign-in
-            // methods, with comparable size + prominence to the primary
-            // option above.
-            HStack(spacing: 10) {
-                Rectangle().fill(.secondary.opacity(0.25)).frame(height: 0.5)
-                Text("or").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                Rectangle().fill(.secondary.opacity(0.25)).frame(height: 0.5)
-            }
-            .padding(.top, 14)
-
-            SignInWithAppleButton(
-                mode == .signIn ? .signIn : .signUp,
-                onRequest: { request in
-                    request.requestedScopes = [.fullName, .email]
-                },
-                onCompletion: { result in
-                    Task { await handleAppleAuthorization(result) }
-                }
-            )
-            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-            .frame(height: 42)
-            .disabled(backend.isSyncing)
+            .padding(.top, 8)
 
             if mode == .signUp && isVerificationCodeSent {
                 Button("Resend code", action: resendVerificationCode)
@@ -746,6 +738,29 @@ struct AuthGateView: View {
 
     private var selectedAvatar: AvatarChoice {
         AvatarChoice.options.first { $0.id == selectedAvatarID } ?? AvatarChoice.options[0]
+    }
+
+    /// Apple HIG sign-in button, promoted to the top of the auth form so
+    /// it reads as the primary path. Shadow + slight extra height
+    /// distinguish it from the secondary email-based fallback below.
+    private var appleSignInButton: some View {
+        SignInWithAppleButton(
+            mode == .signIn ? .signIn : .signUp,
+            onRequest: { request in
+                request.requestedScopes = [.fullName, .email]
+            },
+            onCompletion: { result in
+                Task { await handleAppleAuthorization(result) }
+            }
+        )
+        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+        .frame(height: 50)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.5 : 0.18),
+            radius: 12, y: 5
+        )
+        .disabled(backend.isSyncing)
     }
 
     private var primaryActionTitle: String {
