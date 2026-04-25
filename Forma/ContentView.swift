@@ -738,6 +738,15 @@ struct ContentView: View {
             todayKey: todayKey
         )
 
+        // Task due-date reminders — cadence scales with the user's
+        // weekly consistency so flaky users get more nudges, consistent
+        // users barely get any. Pass the full habits list so the
+        // manager can filter to .task entries internally.
+        timeReminderManager.refreshTaskReminders(
+            for: habits,
+            consistencyPercent: metrics.weeklyConsistencyPercent
+        )
+
         let activeHabits = habitEntries.filter { !$0.isArchived }
         let hasIncompleteHabits = activeHabits.contains { !$0.completedDayKeys.contains(todayKey) }
         let freezes = backend.dashboard?.rewards.freezesAvailable ?? 0

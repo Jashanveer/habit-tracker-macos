@@ -143,6 +143,156 @@ final class TimeReminderManager: ObservableObject {
         }
     }
 
+    // MARK: - Task reminders
+
+    private let taskIdentifierPrefix = "task-reminder-"
+
+    /// Schedules due-date reminders for every pending task. Cadence scales
+    /// with the user's weekly consistency — flaky users get more nudges
+    /// (3/day on the due day) while consistent users get a single morning
+    /// heads-up. Cancelled + rescheduled on every habit-list change so a
+    /// freshly-checked task doesn't keep buzzing.
+    func refreshTaskReminders(
+        for habits: [Habit],
+        consistencyPercent: Int
+    ) {
+        let center = UNUserNotificationCenter.current()
+        let now = Date()
+        let calendar = Calendar.current
+
+        let pending = habits.filter { task in
+            task.entryType == .task
+                && !task.isArchived
+                && !task.isTaskCompleted
+                && task.dueAt != nil
+        }
+
+        let plans = pending.flatMap { task in
+            taskReminderPlans(
+                for: task,
+                now: now,
+                calendar: calendar,
+                consistencyPercent: consistencyPercent
+            )
+        }
+
+        center.getPendingNotificationRequests { [taskIdentifierPrefix, plans] requests in
+            let stale = requests
+                .map(\.identifier)
+                .filter { $0.hasPrefix(taskIdentifierPrefix) }
+            center.removePendingNotificationRequests(withIdentifiers: stale)
+
+            for plan in plans {
+                let content = UNMutableNotificationContent()
+                content.title = plan.title
+                content.body = plan.body
+                content.sound = .default
+
+                let comps = Calendar.current.dateComponents(
+                    [.year, .month, .day, .hour, .minute],
+                    from: plan.triggerDate
+                )
+                let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+                let request = UNNotificationRequest(
+                    identifier: "\(taskIdentifierPrefix)\(plan.identifier)",
+                    content: content,
+                    trigger: trigger
+                )
+                center.add(request)
+            }
+        }
+    }
+
+    /// Per-task plan list. Cadence rules:
+    ///   - <50% consistency  → morning + noon + 1 h before due
+    ///   - 50–80%            → morning + 2 h before due
+    ///   - >80%              → morning of due day only
+    /// Past triggers are silently dropped so the only requests added are
+    /// future ones (avoiding "instant fire" on stale due dates).
+    private func taskReminderPlans(
+        for task: Habit,
+        now: Date,
+        calendar: Calendar,
+        consistencyPercent: Int
+    ) -> [TaskReminderPlan] {
+        guard let due = task.dueAt else { return [] }
+
+        let stableId: String = {
+            if let bid = task.backendId { return "b\(bid)" }
+            return task.ensureLocalUUID().uuidString
+        }()
+
+        let dueLabel = Self.dueDateLabel(due, calendar: calendar, now: now)
+        let bodyText = "Due \(dueLabel): \(task.title)"
+
+        let triggers = Self.taskTriggerDates(
+            due: due,
+            consistencyPercent: consistencyPercent,
+            calendar: calendar
+        )
+
+        return triggers
+            .filter { $0.date > now.addingTimeInterval(60) }
+            .map { trigger in
+                TaskReminderPlan(
+                    identifier: "\(stableId)-\(trigger.slot)",
+                    title: "Task due \(dueLabel)",
+                    body: bodyText,
+                    triggerDate: trigger.date
+                )
+            }
+    }
+
+    /// Computes the absolute trigger times for a task based on the user's
+    /// weekly consistency. Static so it stays trivially testable.
+    private static func taskTriggerDates(
+        due: Date,
+        consistencyPercent: Int,
+        calendar: Calendar
+    ) -> [(slot: String, date: Date)] {
+        let dueDayMorning = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: due) ?? due
+        let dueDayNoon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: due) ?? due
+        let oneHourBefore = due.addingTimeInterval(-3600)
+        let twoHoursBefore = due.addingTimeInterval(-7200)
+
+        if consistencyPercent < 50 {
+            // Lots of safety nets — three nudges before the deadline.
+            return [
+                ("morning", dueDayMorning),
+                ("noon", dueDayNoon),
+                ("1hbefore", oneHourBefore)
+            ]
+        } else if consistencyPercent < 80 {
+            return [
+                ("morning", dueDayMorning),
+                ("2hbefore", twoHoursBefore)
+            ]
+        } else {
+            // High-consistency users barely need reminding.
+            return [("morning", dueDayMorning)]
+        }
+    }
+
+    /// Friendly relative-date copy used in the notification title:
+    /// "today", "tomorrow", "Friday", or "Aug 12" depending on distance.
+    private static func dueDateLabel(_ date: Date, calendar: Calendar, now: Date) -> String {
+        let today = calendar.startOfDay(for: now)
+        let target = calendar.startOfDay(for: date)
+        let days = calendar.dateComponents([.day], from: today, to: target).day ?? 0
+        switch days {
+        case 0:    return "today"
+        case 1:    return "tomorrow"
+        case 2...6:
+            let f = DateFormatter()
+            f.dateFormat = "EEEE"
+            return f.string(from: date)
+        default:
+            let f = DateFormatter()
+            f.dateFormat = "MMM d"
+            return f.string(from: date)
+        }
+    }
+
     private func reminderPlans(
         for habits: [Habit],
         todayKey: String,
@@ -199,6 +349,13 @@ final class TimeReminderManager: ObservableObject {
 
 private struct ReminderPlan {
     let windowRawValue: String
+    let title: String
+    let body: String
+    let triggerDate: Date
+}
+
+private struct TaskReminderPlan {
+    let identifier: String
     let title: String
     let body: String
     let triggerDate: Date
