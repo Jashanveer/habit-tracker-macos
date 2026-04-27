@@ -427,6 +427,11 @@ struct AuthGateView: View {
     /// response lands. Not called for the "send verification code" step since
     /// that doesn't lead to an authenticated session.
     var onAuthSubmit: () -> Void = {}
+    /// Called when an Apple Sign-In attempt finishes unsuccessfully (network
+    /// failure, cancelled mid-request, or backend rejection). Without this,
+    /// the parent's loading cascade has no way to know the request failed
+    /// and stays up indefinitely. Mirrors the iOS callback.
+    var onAuthFailed: (() -> Void)? = nil
     let onAuthenticated: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -785,11 +790,13 @@ struct AuthGateView: View {
         case .failure(let error):
             // ASAuthorizationError.canceled isn't a real failure — user
             // dismissed the sheet. Anything else (network, account
-            // unavailable) deserves a visible error.
+            // unavailable) deserves a visible error AND the parent must
+            // know so it can dismiss any loading cascade it raised.
             if let asError = error as? ASAuthorizationError, asError.code == .canceled {
                 return
             }
             backend.errorMessage = "Apple sign-in failed: \(error.localizedDescription)"
+            onAuthFailed?()
             return
         case .success(let auth):
             guard let credential = auth.credential as? ASAuthorizationAppleIDCredential,
@@ -797,6 +804,7 @@ struct AuthGateView: View {
                   let token = String(data: tokenData, encoding: .utf8)
             else {
                 backend.errorMessage = "Apple didn't return an identity token"
+                onAuthFailed?()
                 return
             }
             let displayName: String? = {
@@ -805,9 +813,15 @@ struct AuthGateView: View {
                 let formatted = formatter.string(from: components).trimmingCharacters(in: .whitespaces)
                 return formatted.isEmpty ? nil : formatted
             }()
+            // Tell the parent we're about to issue a network request so the
+            // loading cascade can rise BEFORE the round-trip starts (matches
+            // the password sign-in path which calls onAuthSubmit on tap).
+            onAuthSubmit()
             await backend.signInWithApple(identityToken: token, displayName: displayName)
             if backend.isAuthenticated {
                 onAuthenticated()
+            } else {
+                onAuthFailed?()
             }
         }
     }

@@ -41,11 +41,22 @@ struct FormaApp: App {
             try? fm.removeItem(at: url)
         }
 
-        do {
-            return try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            fatalError("Could not create ModelContainer even after store reset: \(error)")
+        if let recovered = try? ModelContainer(for: schema, configurations: [config]) {
+            return recovered
         }
+
+        // Last resort: fall back to an in-memory container so the app still
+        // launches (read-only-ish behaviour, server reconcile re-populates
+        // habits on next sync). Crashing here would brick every user with
+        // a corrupt sandbox; an empty session lets them sign in and recover.
+        print("[FormaApp] WARNING: SwiftData container failed; using in-memory fallback.")
+        let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        if let memContainer = try? ModelContainer(for: schema, configurations: [memoryConfig]) {
+            return memContainer
+        }
+        // If even the in-memory path fails, the runtime is broken — there's
+        // nothing the user can do. fatalError is honest at this point.
+        fatalError("ModelContainer could not be created with on-disk OR in-memory storage.")
     }
 
     var body: some Scene {

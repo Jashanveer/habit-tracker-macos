@@ -128,6 +128,13 @@ final class WidgetSnapshotWriter {
         var mutated = false
         for entry in pending {
             guard let habit = habits.first(where: { Self.widgetId(for: $0) == entry.habitId }) else { continue }
+            // Auto-verified habits (HealthKit/Screen Time) own their own
+            // completion state via AutoVerificationCoordinator. The widget
+            // must never push a manual day-key toggle for them — doing so
+            // would inject phantom dots into the 7-day strip (the user's
+            // "2 dots" bug if the widget is tapped on a different day than
+            // today's verified completion).
+            if habit.isAutoVerified { continue }
             applyToggle(to: habit, dayKey: entry.dayKey)
             mutated = true
         }

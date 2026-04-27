@@ -77,14 +77,22 @@ actor ResponseCache {
     private var habits: Entry<[BackendHabit]>?
     private var dashboard: Entry<AccountabilityDashboard>?
 
-    // MARK: Habits (TTL: 120 s)
+    // MARK: Habits (TTL: 5 s)
+    //
+    // Long-lived habit caches were causing a real cross-device-sync bug:
+    // when the SSE event fired and the receiver ran a fresh sync, the
+    // sync would happily return a 30-120-second-stale snapshot from the
+    // cache and the new habit would never land. Five seconds is short
+    // enough that the polling fallback in ContentView always sees fresh
+    // data, but still long enough to coalesce the burst of refreshes
+    // SwiftUI scenes emit on launch.
 
     func cachedHabits() -> [BackendHabit]? {
         guard let e = habits, e.expiresAt > Date() else { return nil }
         return e.value
     }
 
-    func cacheHabits(_ value: [BackendHabit], ttl: TimeInterval = 120) {
+    func cacheHabits(_ value: [BackendHabit], ttl: TimeInterval = 5) {
         habits = Entry(value: value, expiresAt: Date(timeIntervalSinceNow: ttl))
     }
 
@@ -218,14 +226,28 @@ actor BackendAPIClient {
     private let encoder = JSONEncoder()
     private var session: BackendSession?
     let retryPolicy: RetryPolicy
+    /// Monotonic counter that increments on every session boundary
+    /// (login, register, Apple sign-in, refresh-success, clearSession).
+    /// Used by the session-invalidated notification to defeat a TOCTOU
+    /// race: a delayed 401 from a request issued under session A can
+    /// arrive AFTER the user signs back in as session B; without an
+    /// epoch the handler would kick them out of session B. The handler
+    /// compares the notification's epoch to the current epoch and drops
+    /// the notification if the epoch advanced in the meantime.
+    private var sessionEpoch: UInt = 0
 
     init(initialSession: BackendSession?, retryPolicy: RetryPolicy = .default) {
         session = initialSession
         self.retryPolicy = retryPolicy
+        if initialSession != nil { sessionEpoch &+= 1 }
     }
 
     func currentSession() -> BackendSession? { session }
-    func clearSession() { session = nil }
+    func currentEpoch() -> UInt { sessionEpoch }
+    func clearSession() {
+        session = nil
+        sessionEpoch &+= 1
+    }
 
     // MARK: Auth
 
@@ -234,7 +256,10 @@ actor BackendAPIClient {
             path: "/api/auth/login", method: "POST",
             body: LoginRequest(username: username, password: password)
         )
-        let s = BackendSession.fromAuthTokens(tokens); session = s; return s
+        let s = BackendSession.fromAuthTokens(tokens)
+        session = s
+        sessionEpoch &+= 1
+        return s
     }
 
     /// Sign in with Apple — exchanges Apple's identity token for Forma's
@@ -246,7 +271,10 @@ actor BackendAPIClient {
             path: "/api/auth/apple", method: "POST",
             body: AppleLoginRequest(identityToken: identityToken, displayName: displayName)
         )
-        let s = BackendSession.fromAuthTokens(tokens); session = s; return s
+        let s = BackendSession.fromAuthTokens(tokens)
+        session = s
+        sessionEpoch &+= 1
+        return s
     }
 
     /// Live availability probe used by the profile-setup screen so users
@@ -262,13 +290,18 @@ actor BackendAPIClient {
         return response.available
     }
 
-    /// One-time post-Apple-signup setup — submits the chosen username +
-    /// avatar URL. Backend persists, returns the refreshed MeResponse
-    /// the caller doesn't need (we just care that it succeeded).
-    func setupProfile(username: String, avatarURL: String) async throws {
+    /// One-time post-Apple-signup setup — submits the chosen username,
+    /// avatar URL, and (for Apple sign-ups where Apple didn't return
+    /// fullName) the user's typed display name. Backend persists,
+    /// returns the refreshed MeResponse the caller doesn't need.
+    func setupProfile(username: String, avatarURL: String, displayName: String?) async throws {
         let _: MeResponse = try await authorizedRequest(
             path: "/api/users/me/setup-profile", method: "POST",
-            body: ProfileSetupRequest(username: username, avatarUrl: avatarURL)
+            body: ProfileSetupRequest(
+                username: username,
+                avatarUrl: avatarURL,
+                displayName: displayName
+            )
         )
     }
 
@@ -296,12 +329,15 @@ actor BackendAPIClient {
                 verificationCode: verificationCode
             )
         )
-        let s = BackendSession.fromAuthTokens(tokens); session = s; return s
+        let s = BackendSession.fromAuthTokens(tokens)
+        session = s
+        sessionEpoch &+= 1
+        return s
     }
 
     func refreshSession() async throws -> BackendSession {
         guard let rt = session?.refreshToken, !rt.isEmpty else {
-            await Self.notifySessionInvalidated()
+            await Self.notifySessionInvalidated(epoch: sessionEpoch)
             throw HabitBackendError.notAuthenticated
         }
         do {
@@ -309,17 +345,26 @@ actor BackendAPIClient {
                 path: "/api/auth/refresh", method: "POST",
                 body: RefreshRequest(refreshToken: rt)
             )
-            let s = BackendSession.fromAuthTokens(tokens); session = s; return s
+            let s = BackendSession.fromAuthTokens(tokens)
+            session = s
+            sessionEpoch &+= 1
+            return s
         } catch HabitBackendError.notAuthenticated {
             // The refresh token itself is bad — the only recovery is for the
             // user to sign in again. Drop the local session and broadcast so
-            // `HabitBackendStore` can sign out automatically.
+            // `HabitBackendStore` can sign out automatically. The epoch we
+            // emit is the one that was current at notification time; if the
+            // user has already re-authenticated by the time the handler runs
+            // the apiClient's epoch will be higher and the handler drops
+            // this notice instead of kicking them back out.
             session = nil
-            await Self.notifySessionInvalidated()
+            sessionEpoch &+= 1
+            await Self.notifySessionInvalidated(epoch: sessionEpoch)
             throw HabitBackendError.notAuthenticated
         } catch HabitBackendError.server(let msg) where msg.lowercased().contains("unauth") || msg.lowercased().contains("invalid") {
             session = nil
-            await Self.notifySessionInvalidated()
+            sessionEpoch &+= 1
+            await Self.notifySessionInvalidated(epoch: sessionEpoch)
             throw HabitBackendError.notAuthenticated
         }
     }
@@ -327,10 +372,20 @@ actor BackendAPIClient {
     /// Posted whenever the refresh token can't produce a valid session, so the
     /// store can drop local state and send the user back to the sign-in screen.
     static let sessionInvalidatedNotification = Notification.Name("BackendAPIClient.sessionInvalidated")
+    /// Key for the `sessionEpoch` value attached to the userInfo dictionary.
+    /// The handler reads this and compares it against the current API client
+    /// epoch — if older, the notification is for a stale prior session and
+    /// the handler drops it without signing the (now re-authenticated) user
+    /// out of their valid newer session.
+    static let sessionInvalidatedEpochKey = "epoch"
 
-    private static func notifySessionInvalidated() async {
+    private static func notifySessionInvalidated(epoch: UInt) async {
         await MainActor.run {
-            NotificationCenter.default.post(name: sessionInvalidatedNotification, object: nil)
+            NotificationCenter.default.post(
+                name: sessionInvalidatedNotification,
+                object: nil,
+                userInfo: [sessionInvalidatedEpochKey: epoch]
+            )
         }
     }
 
@@ -496,7 +551,7 @@ actor BackendAPIClient {
     private struct RegisterRequest: Encodable { let username, email, password, avatarUrl, verificationCode: String }
     private struct RefreshRequest:  Encodable { let refreshToken: String }
     private struct AppleLoginRequest: Encodable { let identityToken: String; let displayName: String? }
-    private struct ProfileSetupRequest: Encodable { let username: String; let avatarUrl: String }
+    private struct ProfileSetupRequest: Encodable { let username: String; let avatarUrl: String; let displayName: String? }
     private struct UsernameAvailabilityResponse: Decodable { let available: Bool }
     private struct MeResponse: Decodable { let userId: Int64?; let email: String?; let username: String? }
     private struct LogoutRequest:   Encodable { let refreshToken: String }
@@ -522,8 +577,8 @@ struct AuthRepository {
         try await client.isUsernameAvailable(username)
     }
 
-    func setupProfile(username: String, avatarURL: String) async throws {
-        try await client.setupProfile(username: username, avatarURL: avatarURL)
+    func setupProfile(username: String, avatarURL: String, displayName: String?) async throws {
+        try await client.setupProfile(username: username, avatarURL: avatarURL, displayName: displayName)
     }
 
     func requestEmailVerification(email: String) async throws {
@@ -831,9 +886,17 @@ struct AccountabilityRepository {
     /// The backend publishes `habits.changed` every time this user writes
     /// a habit on any device; subscribers respond by re-running their
     /// normal sync pass so state converges across devices in seconds.
+    /// `?platform=` lets the server log which devices are connected so
+    /// "subscribers=2" diagnostics can distinguish iOS+macOS from two
+    /// stale connections of the same client.
     func userStreamRequest(lastEventID: String?) async throws -> URLRequest {
-        try await client.authorizedSSERequest(
-            path: "/api/me/stream",
+        #if os(iOS)
+        let platform = "ios"
+        #else
+        let platform = "macos"
+        #endif
+        return try await client.authorizedSSERequest(
+            path: "/api/me/stream?platform=\(platform)",
             lastEventID: lastEventID
         )
     }

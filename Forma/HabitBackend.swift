@@ -333,6 +333,15 @@ final class HabitBackendStore: ObservableObject {
     /// public username + avatar before letting the dashboard render.
     /// Cleared by `setupAppleProfile` on success.
     @Published var requiresProfileSetup: Bool = false
+    /// Real name Apple's identity token returned on the first
+    /// authorization, retained across the brief moment between
+    /// `signInWithApple` succeeding and `AppleProfileSetupView` rendering
+    /// so we can prefill the "Your name" field. Apple drops `fullName`
+    /// on every subsequent sign-in, so when this is nil the setup
+    /// screen forces the user to type a name themselves — that's the
+    /// fix for the "my display name comes out as a random hash"
+    /// behaviour seen with private-relay email accounts.
+    @Published var pendingAppleFullName: String? = nil
     /// Mirrors `NWPathMonitor`. False while the device has no route to the
     /// backend; the UI uses this to hide network-failure toasts and to trigger
     /// a full sync on the next reconnection.
@@ -386,6 +395,68 @@ final class HabitBackendStore: ObservableObject {
     /// device mutated a habit so ContentView can trigger sync in seconds.
     private var userStreamTask: Task<Void, Never>?
     private var lastUserStreamEventID: String?
+    /// Dedicated URLSession for the per-user SSE stream. The shared
+    /// session can buffer text/event-stream responses — the server
+    /// reports "delivered" but the client's `.lines` iterator never
+    /// fires. A dedicated session with caching disabled forces bytes
+    /// to flush as they arrive instead of waiting for buffer
+    /// thresholds.
+    ///
+    /// `timeoutIntervalForRequest` is the per-event idle limit, NOT
+    /// the total connection lifetime. We push it past the server's
+    /// 15-second heartbeat so an idle stream that's only emitting
+    /// pings doesn't time out, but keep it finite so a wedged
+    /// connection eventually fails and triggers a reconnect rather
+    /// than hanging forever. `timeoutIntervalForResource` is the
+    /// total ceiling — we let it match the server's 30-min emitter
+    /// timeout. Setting either to `0` on macOS is interpreted as
+    /// "instant timeout" and silently drops the connection — that's
+    /// the bug an earlier revision of this code shipped with.
+    /// Shared URLSession for ALL SSE work (per-match stream + per-user stream).
+    /// Held as `var` so `signOut` can `invalidateAndCancel()` it and replace
+    /// with a fresh one — without that, the underlying URLSessionDataTask can
+    /// keep trickling bytes after the user signs out, leaking the previous
+    /// user's data into a re-signed-in session.
+    /// (Uses the explicit class name instead of `Self.` because Swift refuses
+    /// `Self` in stored-property initializers even on `final` classes.)
+    private var sseSession: URLSession = HabitBackendStore.makeSseSession()
+
+    private static func makeSseSession() -> URLSession {
+        let config = URLSessionConfiguration.default
+        // Idle timeout — server sends a `ping` every 15s, so 45s lets
+        // us tolerate one missed heartbeat before declaring the
+        // stream wedged and reconnecting.
+        config.timeoutIntervalForRequest = 45
+        config.timeoutIntervalForResource = 30 * 60    // matches server EMITTER_TIMEOUT_MS
+        config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        config.urlCache = nil
+        // `waitsForConnectivity = true` is intentionally LEFT OFF: it
+        // made URLSession wait silently when the backend was
+        // unreachable instead of failing fast and triggering the
+        // reconnect-with-backoff loop. We'd rather see Connection
+        // refused immediately.
+        config.httpMaximumConnectionsPerHost = 4
+        return URLSession(configuration: config)
+    }
+
+    /// Invalidate any in-flight SSE bytes-async tasks and replace the session
+    /// so subsequent sign-ins start with a fresh transport. Called from
+    /// signOut + clearSession; safe to call multiple times.
+    private func resetSseSession() {
+        sseSession.invalidateAndCancel()
+        sseSession = HabitBackendStore.makeSseSession()
+    }
+
+    /// DEBUG-only logger for the per-user SSE channel. The user-stream loop
+    /// is chatty (one line per connect / event / disconnect) and the
+    /// `habits.changed` payload contains user data — neither belongs in
+    /// Release builds where it lands in the device's unified log.
+    @inline(__always)
+    private static func sseLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print(message())
+        #endif
+    }
     private var lastSentMessageAt: Date?
     private var lastSentMessageText: String?
     private let networkMonitor = NetworkMonitor()
@@ -459,9 +530,25 @@ final class HabitBackendStore: ObservableObject {
         )
     }
 
-    @objc private func handleSessionInvalidatedNotification() {
+    @objc private func handleSessionInvalidatedNotification(_ notification: Notification) {
         guard isAuthenticated else { return }
-        clearSession(errorMessage: "Your session expired — please sign in again.")
+        // Defeat the stale-401 race: a 401 from a request issued under
+        // session A can arrive at the notification handler AFTER the user
+        // has signed out and back in (session B). The notification's userInfo
+        // carries the API client epoch at post time; if our current epoch is
+        // higher, the user is on session B and we must NOT kick them out.
+        let staleEpoch = notification.userInfo?[BackendAPIClient.sessionInvalidatedEpochKey] as? UInt
+        Task { @MainActor in
+            let currentEpoch = await apiClient.currentEpoch()
+            if let staleEpoch, staleEpoch < currentEpoch {
+                #if DEBUG
+                print("[Auth] dropped stale session-invalidated (epoch \(staleEpoch) < current \(currentEpoch))")
+                #endif
+                return
+            }
+            guard isAuthenticated else { return }
+            clearSession(errorMessage: "Your session expired — please sign in again.")
+        }
     }
 
     /// Shown in place of raw URLSession errors when the device is offline.
@@ -523,8 +610,18 @@ final class HabitBackendStore: ObservableObject {
                 // before landing on the dashboard.
                 requiresProfileSetup = true
                 justRegistered = true
+                // Stash whatever Apple returned in `fullName` (only
+                // populated on the very first authorization) so the
+                // setup screen can prefill the "Your name" field.
+                // When this is nil, the screen requires the user to
+                // type a name — that's the fix for private-relay
+                // email accounts that previously ended up with a
+                // random-looking hash as their display name.
+                let trimmed = displayName?.trimmingCharacters(in: .whitespaces) ?? ""
+                pendingAppleFullName = trimmed.isEmpty ? nil : trimmed
             } else {
                 requiresProfileSetup = false
+                pendingAppleFullName = nil
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -544,25 +641,26 @@ final class HabitBackendStore: ObservableObject {
     /// inspect the error: `invalidResponse` means the server likely
     /// committed; every other case (network, 4xx with recognizable
     /// message) leaves the flag set so the user can retry.
-    func setupAppleProfile(username: String, avatarURL: String) async -> Bool {
+    func setupAppleProfile(username: String, avatarURL: String, displayName: String?) async -> Bool {
         authRequestState = .loading; refreshSyncingState()
         defer { refreshSyncingState() }
         do {
-            try await authRepository.setupProfile(username: username, avatarURL: avatarURL)
+            try await authRepository.setupProfile(
+                username: username,
+                avatarURL: avatarURL,
+                displayName: displayName
+            )
             requiresProfileSetup = false
-            errorMessage = nil
-            authRequestState = .success(())
-            return true
-        } catch HabitBackendError.invalidResponse {
-            // Server likely accepted the write but we couldn't decode
-            // the response payload. Clear the flag so the user isn't
-            // stuck; any actual server-side failure would have come
-            // through as a typed 4xx with a readable message instead.
-            requiresProfileSetup = false
+            pendingAppleFullName = nil
             errorMessage = nil
             authRequestState = .success(())
             return true
         } catch {
+            // No more silently-pretend-success on invalidResponse — that path
+            // masked half-provisioned accounts where the server actually
+            // failed but the decoder happened to throw before we could
+            // surface the failure. Always surface the error so the user
+            // re-prompts; `requiresProfileSetup` stays true so they can retry.
             errorMessage = error.localizedDescription
             authRequestState = .failure(error.localizedDescription)
             return false
@@ -626,6 +724,11 @@ final class HabitBackendStore: ObservableObject {
     func signOut() {
         stopStream()
         stopUserStream()
+        // Invalidate the SSE transport so any bytes still in flight from the
+        // prior session don't leak into a subsequent sign-in. Without this,
+        // signing in as a different user could see the previous user's
+        // residual `habits.changed` events bleed through.
+        resetSseSession()
         clearSession()
         Task {
             await apiClient.logout()
@@ -1189,6 +1292,13 @@ final class HabitBackendStore: ObservableObject {
         dashboard = value
         WidgetSnapshotWriter.shared.updateBackendData(value)
         if let matchID = value.match?.id {
+            // Snapshot the highest known message id before merging so we can
+            // tell whether the dashboard payload carried a fresh AI reply —
+            // otherwise the typing indicator hangs until its safety timeout
+            // because SSE may deliver the event after this merge has already
+            // de-duplicated it away.
+            let prevMaxId = (liveMessagesByMatch[matchID] ?? []).map(\.id).max() ?? 0
+
             // Merge the dashboard snapshot with whatever SSE has already
             // delivered — dropping existing live entries would wipe an AI
             // reply that landed between the server's snapshot time and the
@@ -1197,6 +1307,13 @@ final class HabitBackendStore: ObservableObject {
             for msg in value.menteeDashboard.messages { merged[msg.id] = msg }
             for msg in liveMessagesByMatch[matchID] ?? [] { merged[msg.id] = msg }
             liveMessagesByMatch[matchID] = merged.values.sorted { $0.createdAt < $1.createdAt }
+
+            if aiMentorTyping, let match = value.match, match.aiMentor {
+                let mentorId = match.mentor.userId
+                let gotFreshAIReply = merged.values.contains { $0.senderId == mentorId && $0.id > prevMaxId }
+                if gotFreshAIReply { setAIMentorTyping(false, matchId: matchID) }
+            }
+
             startStream(for: matchID)
         } else {
             stopStream()
@@ -1234,28 +1351,35 @@ final class HabitBackendStore: ObservableObject {
 
     private func runUserStreamLoop() async {
         var backoffSeconds: TimeInterval = 1
+        var attempt = 0
         while !Task.isCancelled, isAuthenticated {
+            attempt += 1
+            HabitBackendStore.sseLog("[UserStream] attempt #\(attempt) connecting…")
             do {
                 let request = try await accountabilityRepository.userStreamRequest(
                     lastEventID: lastUserStreamEventID
                 )
-                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                let (bytes, response) = try await sseSession.bytes(for: request)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                     let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    print("[UserStream] connect failed — status \(code)")
+                    HabitBackendStore.sseLog("[UserStream] connect failed — status \(code)")
                     throw HabitBackendError.invalidResponse
                 }
-                print("[UserStream] connected")
+                HabitBackendStore.sseLog("[UserStream] connected (attempt #\(attempt))")
                 backoffSeconds = 1
                 try await consumeUserStreamLines(lines: bytes.lines)
-                print("[UserStream] disconnected (peer closed)")
+                HabitBackendStore.sseLog("[UserStream] disconnected (peer closed) — will reconnect")
             } catch {
-                if Task.isCancelled { return }
-                print("[UserStream] error: \(error.localizedDescription) — retrying in \(Int(backoffSeconds))s")
+                if Task.isCancelled {
+                    HabitBackendStore.sseLog("[UserStream] task cancelled — exiting loop")
+                    return
+                }
+                HabitBackendStore.sseLog("[UserStream] error: \(error.localizedDescription) — retrying in \(Int(backoffSeconds))s")
                 try? await Task.sleep(for: .seconds(backoffSeconds))
                 backoffSeconds = min(backoffSeconds * 2, 30)
             }
         }
+        HabitBackendStore.sseLog("[UserStream] loop exited (cancelled=\(Task.isCancelled) authed=\(isAuthenticated))")
     }
 
     private func consumeUserStreamLines<S: AsyncSequence>(lines: S) async throws where S.Element == String {
@@ -1284,13 +1408,37 @@ final class HabitBackendStore: ObservableObject {
         if let id = id, !id.isEmpty { lastUserStreamEventID = id }
         switch name {
         case "habits.changed":
-            print("[UserStream] habits.changed — triggering sync")
-            // Broadcast — ContentView owns the sync trigger.
-            NotificationCenter.default.post(name: .habitsChangedSSE, object: nil)
+            HabitBackendStore.sseLog("[UserStream] habits.changed received id=\(id ?? "-") payload=\(payload)")
+            Task {
+                await responseCache.invalidateHabits()
+                await responseCache.invalidateDashboard()
+                HabitBackendStore.sseLog("[UserStream] cache invalidated; posting .habitsChangedSSE")
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .habitsChangedSSE, object: nil)
+                }
+            }
+        case "prefs.changed":
+            // Profile (username/avatar/displayName) or settings
+            // (weekly-report toggle) changed on another device. Refresh
+            // both — dashboard caches displayName/avatar and the
+            // preferences endpoint backs the email-opt-in toggle.
+            #if DEBUG
+            HabitBackendStore.sseLog("[UserStream] prefs.changed received id=\(id ?? "-")")
+            #endif
+            Task { @MainActor in
+                await responseCache.invalidateDashboard()
+                await loadPreferences()
+                await refreshDashboard()
+                // Push the fresh displayName into Widgets so they stop
+                // rendering the stale name. macOS has no Live Activity, so
+                // there's no equivalent of the iOS StreakActivityController
+                // call here.
+                WidgetSnapshotWriter.shared.refresh()
+            }
         case "ping", "stream.ready":
             break
         default:
-            print("[UserStream] unknown event '\(name)'")
+            HabitBackendStore.sseLog("[UserStream] unknown event '\(name)'")
         }
     }
 
@@ -1305,7 +1453,10 @@ final class HabitBackendStore: ObservableObject {
                 let request = try await accountabilityRepository.streamRequest(
                     matchId: matchID, lastEventID: lastStreamEventID
                 )
-                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                // Use the shared sseSession (not URLSession.shared) so signOut
+                // can invalidate it cleanly — URLSession.shared is global and
+                // can't be reset without affecting other consumers.
+                let (bytes, response) = try await sseSession.bytes(for: request)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                     throw HabitBackendError.invalidResponse
                 }
@@ -1373,6 +1524,17 @@ final class HabitBackendStore: ObservableObject {
     }
 
     private func appendMessage(_ message: AccountabilityDashboard.Message, to matchID: Int64) {
+        // Clear the "typing…" indicator the moment a message from the AI
+        // mentor is observed. Run this *before* the dedup guard so SSE
+        // re-deliveries (server may emit the event after the dashboard
+        // snapshot already imported the row) still clear the indicator.
+        if let match = dashboard?.match,
+           match.id == matchID,
+           match.aiMentor,
+           message.senderId == match.mentor.userId {
+            setAIMentorTyping(false, matchId: matchID)
+        }
+
         var msgs = liveMessagesByMatch[matchID] ?? []
         guard !msgs.contains(where: { $0.id == message.id }) else { return }
         msgs.append(message)
@@ -1381,15 +1543,6 @@ final class HabitBackendStore: ObservableObject {
         msgs.sort { $0.createdAt < $1.createdAt }
         if msgs.count > 60 { msgs = Array(msgs.suffix(60)) }
         liveMessagesByMatch[matchID] = msgs
-
-        // Clear the "typing…" indicator the moment a message from the AI
-        // mentor lands — this is the real signal the reply arrived.
-        if let match = dashboard?.match,
-           match.id == matchID,
-           match.aiMentor,
-           message.senderId == match.mentor.userId {
-            setAIMentorTyping(false, matchId: matchID)
-        }
     }
 
     // MARK: - Error handling
@@ -1459,6 +1612,7 @@ final class HabitBackendStore: ObservableObject {
         statusMessage = nil; self.errorMessage = errorMessage
         justRegistered = false
         requiresProfileSetup = false
+        pendingAppleFullName = nil
         KeychainSessionStore.delete()
         UserDefaults.standard.removeObject(forKey: Self.legacySessionKey)
         UserDefaults.standard.removeObject(forKey: Self.legacyTokenKey)

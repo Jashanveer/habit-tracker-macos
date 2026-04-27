@@ -224,7 +224,10 @@ struct ContentViewScaffold: View {
             // Profile setup wins over normal onboarding — a fresh Apple
             // sign-up needs a username + avatar before anything else.
             if backend.requiresProfileSetup {
-                AppleProfileSetupView(backend: backend) {
+                AppleProfileSetupView(
+                    backend: backend,
+                    prefilledDisplayName: backend.pendingAppleFullName
+                ) {
                     // Setup committed; flag is already cleared by the
                     // store. UI naturally falls through to OnboardingView
                     // on the next render because requiresProfileSetup is
@@ -238,14 +241,12 @@ struct ContentViewScaffold: View {
                     .zIndex(190)
             }
         }
-        .overlay {
-            FormaIntroView(
-                backend: backend,
-                onReady: onSync
-            )
-            .transition(.opacity)
-            .zIndex(200)
-        }
+        // Walking characters — applied BEFORE the FormaIntroView overlay so
+        // the cold-launch yellow/blue cascade sits on top of them. SwiftUI
+        // composes `.overlay` modifiers in declaration order (later → on top),
+        // so the previous order (intro first, mentor/mentee after) caused
+        // Bruce + the rival mentee to peek through the loading screen on
+        // every cold launch. Keep the intro overlay LAST.
         .overlay(alignment: .bottom) {
             if showMentorCharacter && backend.isAuthenticated {
                 MentorCharacterView(backend: backend, nudge: $mentorNudge)
@@ -257,6 +258,14 @@ struct ContentViewScaffold: View {
                 MenteeCharacterView(backend: backend)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+        }
+        .overlay {
+            FormaIntroView(
+                backend: backend,
+                onReady: onSync
+            )
+            .transition(.opacity)
+            .zIndex(200)
         }
         .frame(minWidth: 900, minHeight: 600)
     }

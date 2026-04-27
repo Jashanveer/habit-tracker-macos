@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// Pure, testable reconciliation logic for the SwiftData ↔ backend sync.
 ///
@@ -62,8 +63,22 @@ enum SyncEngine {
 
     /// Returns habits that need to be created on the server (no backendId yet,
     /// not already marked deleted).
-    static func pendingCreates(in habits: [Habit]) -> [Habit] {
-        habits.filter { $0.backendId == nil && $0.syncStatus != .deleted }
+    ///
+    /// `excluding` skips habits whose create Task is already in flight from
+    /// `addHabit`. Without this filter a 10-second sync timer firing during
+    /// the in-flight create would call `createHabit` again, producing two
+    /// server-side rows with the same title — which then surface locally as
+    /// duplicate cards (each with their own 7-day dot strip). Caller is
+    /// responsible for maintaining the in-flight set.
+    static func pendingCreates(
+        in habits: [Habit],
+        excluding inFlight: Set<PersistentIdentifier> = []
+    ) -> [Habit] {
+        habits.filter {
+            $0.backendId == nil
+            && $0.syncStatus != .deleted
+            && !inFlight.contains($0.persistentModelID)
+        }
     }
 
     /// Returns habits that have failed a previous upload and can be retried.

@@ -18,30 +18,42 @@ struct AppleProfileSetupView: View {
     let onComplete: () -> Void
     let initialUsername: String?
     let initialAvatarURL: String?
+    let initialDisplayName: String?
     let isEditing: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     @State private var username: String
+    @State private var displayName: String
     @State private var selectedAvatarID: String
     @State private var availability: AvailabilityState
     @State private var lastCheckedUsername: String = ""
     @State private var checkTask: Task<Void, Never>?
     @State private var isSubmitting = false
-    @FocusState private var usernameFocused: Bool
+    @FocusState private var focusedField: Field?
+
+    private enum Field { case displayName, username }
 
     /// Setup-mode initialiser used by the post-signup overlay.
+    /// `prefilledDisplayName` carries whatever Apple's identity token
+    /// returned in `fullName` on the very first authorization. Apple
+    /// drops it on every subsequent sign-in, so this is empty for
+    /// private-relay accounts after the first time — and the screen
+    /// requires the user to type a name themselves.
     init(
         backend: HabitBackendStore,
+        prefilledDisplayName: String? = nil,
         onComplete: @escaping () -> Void
     ) {
         self.backend = backend
         self.onComplete = onComplete
         self.initialUsername = nil
         self.initialAvatarURL = nil
+        self.initialDisplayName = prefilledDisplayName
         self.isEditing = false
         _username = State(initialValue: "")
+        _displayName = State(initialValue: prefilledDisplayName ?? "")
         _selectedAvatarID = State(initialValue: AvatarChoice.options.randomElement()?.id ?? AvatarChoice.options[0].id)
         _availability = State(initialValue: .untouched)
     }
@@ -53,14 +65,17 @@ struct AppleProfileSetupView: View {
         backend: HabitBackendStore,
         initialUsername: String,
         initialAvatarURL: String?,
+        initialDisplayName: String? = nil,
         onComplete: @escaping () -> Void
     ) {
         self.backend = backend
         self.onComplete = onComplete
         self.initialUsername = initialUsername
         self.initialAvatarURL = initialAvatarURL
+        self.initialDisplayName = initialDisplayName
         self.isEditing = true
         _username = State(initialValue: initialUsername)
+        _displayName = State(initialValue: initialDisplayName ?? "")
         let matchedID = AvatarChoice.options.first { $0.url == initialAvatarURL }?.id
             ?? AvatarChoice.options.randomElement()?.id
             ?? AvatarChoice.options[0].id
@@ -83,13 +98,25 @@ struct AppleProfileSetupView: View {
         username.trimmingCharacters(in: .whitespaces)
     }
 
+    private var trimmedDisplayName: String {
+        displayName.trimmingCharacters(in: .whitespaces)
+    }
+
     private var isUsernameFormatValid: Bool {
         let pattern = "^[A-Za-z0-9_]{3,30}$"
         return trimmedUsername.range(of: pattern, options: .regularExpression) != nil
     }
 
+    private var isDisplayNameValid: Bool {
+        let count = trimmedDisplayName.count
+        return count >= 1 && count <= 50
+    }
+
     private var canSubmit: Bool {
-        isUsernameFormatValid && availability == .available && !isSubmitting
+        isUsernameFormatValid
+            && isDisplayNameValid
+            && availability == .available
+            && !isSubmitting
     }
 
     private var selectedAvatar: AvatarChoice {
@@ -99,26 +126,23 @@ struct AppleProfileSetupView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             MinimalBackground()
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 32) {
-                    Spacer(minLength: isEditing ? 24 : 60)
+            VStack(spacing: 18) {
+                header
 
-                    header
+                avatarPreview
 
-                    avatarPreview
+                displayNameField
 
-                    usernameField
+                usernameField
 
-                    avatarGrid
+                avatarGrid
 
-                    continueButton
-
-                    Spacer(minLength: 60)
-                }
-                .frame(maxWidth: 540)
-                .padding(.horizontal, 28)
-                .frame(maxWidth: .infinity)
+                continueButton
             }
+            .frame(maxWidth: 540)
+            .padding(.horizontal, 28)
+            .padding(.vertical, isEditing ? 20 : 28)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             // In edit mode the screen is a sheet — give the user an
             // unambiguous way out. The setup-mode flow is gated by
             // requiresProfileSetup so we deliberately omit it there.
@@ -134,25 +158,38 @@ struct AppleProfileSetupView: View {
                 .buttonStyle(.plain)
             }
         }
-        .onAppear { usernameFocused = !isEditing }
+        .onAppear {
+            // In setup mode, focus the name field first when it's
+            // empty — that's the case Apple didn't return fullName
+            // (every sign-in after the first one for private-relay
+            // accounts), so getting the name is the new requirement.
+            // Otherwise jump straight to username.
+            if isEditing {
+                focusedField = nil
+            } else if trimmedDisplayName.isEmpty {
+                focusedField = .displayName
+            } else {
+                focusedField = .username
+            }
+        }
     }
 
     // MARK: - Sections
 
     private var header: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             Image(systemName: isEditing ? "pencil.circle.fill" : "checkmark.seal.fill")
-                .font(.system(size: 40, weight: .semibold))
+                .font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(CleanShotTheme.accent)
 
             Text(isEditing ? "Edit your profile." : "Welcome to Forma.")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(.system(size: 24, weight: .bold, design: .rounded))
                 .multilineTextAlignment(.center)
 
             Text(isEditing
-                 ? "Update your username or character — these show up on the leaderboard and in friend feeds."
+                 ? "Update your username or character — these show up on the leaderboard."
                  : "Pick a username and a character — these show up on the leaderboard.")
-                .font(.system(size: 14))
+                .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -160,15 +197,15 @@ struct AppleProfileSetupView: View {
     }
 
     private var avatarPreview: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             AsyncImage(url: URL(string: selectedAvatar.url)) { image in
                 image.resizable().scaledToFit()
             } placeholder: {
                 Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 80))
+                    .font(.system(size: 64))
                     .foregroundStyle(.tertiary)
             }
-            .frame(width: 120, height: 120)
+            .frame(width: 84, height: 84)
             .background(
                 Circle().fill(CleanShotTheme.accent.opacity(colorScheme == .dark ? 0.18 : 0.12))
             )
@@ -181,6 +218,42 @@ struct AppleProfileSetupView: View {
                 .foregroundStyle(trimmedUsername.isEmpty ? .tertiary : .primary)
                 .animation(.smooth(duration: 0.18), value: trimmedUsername)
         }
+    }
+
+    private var displayNameField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("YOUR NAME")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.secondary)
+                .kerning(0.4)
+
+            TextField("e.g. Jashan", text: $displayName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 16, weight: .medium))
+                .focused($focusedField, equals: .displayName)
+                .onSubmit { focusedField = .username }
+                .padding(.horizontal, 14)
+                .frame(height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.10), lineWidth: 1)
+                )
+
+            Text(displayNameHelperText)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var displayNameHelperText: String {
+        if let initial = initialDisplayName, !initial.isEmpty, isEditing == false {
+            return "Apple shared this — change it if you want."
+        }
+        return "Shown on your habit cards and to friends. Up to 50 characters."
     }
 
     private var usernameField: some View {
@@ -197,7 +270,7 @@ struct AppleProfileSetupView: View {
                 TextField("e.g. jashan", text: $username)
                     .textFieldStyle(.plain)
                     .font(.system(size: 16, weight: .medium))
-                    .focused($usernameFocused)
+                    .focused($focusedField, equals: .username)
                     .autocorrectionDisabled(true)
                     .onSubmit(submit)
                     .onChange(of: username) { _, _ in
@@ -352,12 +425,14 @@ struct AppleProfileSetupView: View {
     private func submit() {
         guard canSubmit else { return }
         isSubmitting = true
-        let chosenName = trimmedUsername
+        let chosenUsername = trimmedUsername
         let chosenAvatar = selectedAvatar.url
+        let chosenDisplayName = trimmedDisplayName
         Task {
             let success = await backend.setupAppleProfile(
-                username: chosenName,
-                avatarURL: chosenAvatar
+                username: chosenUsername,
+                avatarURL: chosenAvatar,
+                displayName: chosenDisplayName.isEmpty ? nil : chosenDisplayName
             )
             await MainActor.run {
                 isSubmitting = false

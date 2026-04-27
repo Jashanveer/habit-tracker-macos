@@ -22,6 +22,16 @@ struct ContentView: View {
     /// the 7-day dot row can fill in place before the card morphs into a
     /// background stamp via matched geometry.
     @State private var stampStagingIds: Set<PersistentIdentifier> = []
+    /// Local habits whose initial create Task is currently in flight from
+    /// `addHabit`. flushOutbox skips these so it doesn't race the in-flight
+    /// create and produce a duplicate server-side row (which would surface as
+    /// two cards / two completion-dot strips for the same title).
+    @State private var inFlightUploads: Set<PersistentIdentifier> = []
+    /// Re-entrancy guard for `syncWithBackend`. Multiple triggers can fire it
+    /// concurrently (10s timer, SSE event, online-restored handler, .task on
+    /// appear) and concurrent flushOutbox passes will both pick up the same
+    /// pendingCreates, double-uploading every queued habit. Single-flight here.
+    @State private var isSyncing = false
     @Namespace private var stampNamespace
 
     private var showOnboarding: Bool { backend.isAuthenticated && !hasCompletedOnboarding }
@@ -136,6 +146,17 @@ struct ContentView: View {
             refreshTimeReminders()
             handleOverdueTasks()
         }
+        // Polling safety-net for cross-device sync. SSE is the fast
+        // path (`.habitsChangedSSE` above) but it can briefly stall
+        // (URLSession SSE buffering, network blips, server restarts)
+        // and we'd rather pay a tiny periodic GET than leave the user
+        // staring at a stale list. Ten seconds is the worst-case lag
+        // the user will perceive when SSE is broken; with SSE healthy
+        // the same data has already arrived in ~1s.
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
+            guard backend.isAuthenticated else { return }
+            syncWithBackend()
+        }
         .animation(.smooth(duration: 0.2), value: colorScheme)
         .task {
             guard backend.isAuthenticated else { return }
@@ -150,9 +171,7 @@ struct ContentView: View {
             mentorNudge = message
         }
         .onReceive(NotificationCenter.default.publisher(for: .habitsChangedSSE)) { _ in
-            // Another device just wrote a habit — run the normal sync
-            // pass so the local SwiftData store converges in seconds
-            // instead of waiting on the 5-minute timer.
+            print("[ContentView] .habitsChangedSSE received auth=\(backend.isAuthenticated)")
             guard backend.isAuthenticated else { return }
             syncWithBackend()
         }
@@ -208,7 +227,19 @@ struct ContentView: View {
         newHabitTitle = ""
         saveAndRefreshWidgets()
 
+        // Mark this habit as having an in-flight create so any concurrent
+        // flushOutbox pass skips it. Without this guard, the 10s sync timer
+        // (or an SSE event) firing while createHabit is awaiting the network
+        // would call createHabit a second time, producing duplicate rows.
+        let habitID = localHabit.persistentModelID
+        inFlightUploads.insert(habitID)
+
         Task {
+            defer {
+                Task { @MainActor in
+                    inFlightUploads.remove(habitID)
+                }
+            }
             do {
                 let remoteHabit: BackendHabit
                 switch entryType {
@@ -245,8 +276,17 @@ struct ContentView: View {
 
     private func syncWithBackend() {
         guard backend.isAuthenticated else { return }
+        guard !isSyncing else {
+            print("[Sync] skip — another sync is already in flight")
+            return
+        }
+        print("[Sync] syncWithBackend start localHabits=\(habits.count)")
+        isSyncing = true
 
         Task {
+            defer {
+                Task { @MainActor in isSyncing = false }
+            }
             do {
                 try await flushOutbox()
                 async let habitsResponse = backend.listHabits()
@@ -254,7 +294,10 @@ struct ContentView: View {
                 let remoteHabits = try await habitsResponse
                 let remoteTasks = try await tasksResponse
                 let remote = remoteHabits + remoteTasks
-                applyReconcile(SyncEngine.reconcile(local: habits, remote: remote))
+                print("[Sync] fetched remoteHabits=\(remoteHabits.count) remoteTasks=\(remoteTasks.count) ids=\(remote.map { $0.id })")
+                let result = SyncEngine.reconcile(local: habits, remote: remote)
+                print("[Sync] reconcile toInsert=\(result.toInsert.count) toUpdate=\(result.toUpdate.count) toDelete=\(result.toDelete.count)")
+                applyReconcile(result)
                 saveAndRefreshWidgets()
                 backend.errorMessage  = nil
                 // Load the dashboard before handling overdue tasks so the
@@ -274,8 +317,10 @@ struct ContentView: View {
     /// Upload all local habits not yet confirmed by the server.
     /// Server-wins: once a backendId is assigned the pull will overwrite local values.
     private func flushOutbox() async throws {
-        // 1. Create habits that have never been uploaded
-        for habit in SyncEngine.pendingCreates(in: habits) {
+        // 1. Create habits that have never been uploaded.
+        //    `inFlightUploads` excludes habits whose addHabit Task is still
+        //    awaiting createHabit — re-uploading them here would dupe.
+        for habit in SyncEngine.pendingCreates(in: habits, excluding: inFlightUploads) {
             habit.syncStatus = .pending
             do {
                 let remote: BackendHabit

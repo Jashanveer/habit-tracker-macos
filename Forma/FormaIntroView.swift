@@ -115,6 +115,13 @@ struct FormaIntroView: View {
                     backend: backend,
                     iconNamespace: loginNamespace,
                     onAuthSubmit: handleAuthSubmit,
+                    // Drop the cascade if Apple sign-in fails so the user
+                    // returns to the auth card with the error visible
+                    // instead of staring at the yellow/blue grid forever.
+                    // Uses cascadeShouldReveal (the positive "ready to fade
+                    // out" flag macOS exposes) — handleCascadeComplete then
+                    // routes back to .auth because !backend.isAuthenticated.
+                    onAuthFailed: { cascadeShouldReveal = true },
                     onAuthenticated: {}
                 )
                 .transition(.opacity)
