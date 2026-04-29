@@ -4,6 +4,14 @@
 <dict>
 	<key>BackendBaseURL</key>
 	<string>https://rung-backend-dev.fly.dev</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Rung uses Apple Health data to verify your habits and award accurate leaderboard points.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Rung can log workouts and mindfulness minutes back to Apple Health.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

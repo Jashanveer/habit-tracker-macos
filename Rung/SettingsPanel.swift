@@ -50,6 +50,8 @@ struct SettingsPanel: View {
 
                 EmailPreferencesCard(backend: backend)
 
+                AcknowledgmentsCard()
+
                 SocialSummaryCard(metrics: metrics, dashboard: backend.dashboard)
 
                 SocialFeedCard(dashboard: backend.dashboard)
@@ -914,4 +916,130 @@ private struct TimeReminderOptionButton: View {
         )
         .onHover { isHovered = $0 }
     }
+}
+
+// MARK: - Acknowledgments
+
+/// Required by the MIT license terms of the lil-agents project
+/// (github.com/ryanstephen/lil-agents) — Bruce/Jazz character animations
+/// and the looping-video character system in `RiveCharacterView` /
+/// `LoopingVideoView` are derived from that work.
+struct AcknowledgmentsCard: View {
+    @State private var showSheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            PanelTitle(systemImage: "heart.text.square", title: "Acknowledgments")
+            Text("Open-source projects and creators whose work helps make Rung what it is.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("View licenses & credits")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(CleanShotTheme.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .cleanShotSurface(
+                shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+                level: .control
+            )
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cleanShotSurface(
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous),
+            level: .control
+        )
+        .sheet(isPresented: $showSheet) {
+            AcknowledgmentsSheet()
+        }
+    }
+}
+
+struct AcknowledgmentsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Acknowledgments")
+                            .font(.title2.weight(.bold))
+                        Text("Rung stands on the shoulders of others.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .cleanShotSurface(shape: Circle(), level: .control)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("lil agents")
+                        .font(.headline)
+                    Text("Character animations Bruce and Jazz, and the looping-video character system, are derived from lil-agents by Ryan Stephen.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Link("github.com/ryanstephen/lil-agents",
+                         destination: URL(string: "https://github.com/ryanstephen/lil-agents")!)
+                        .font(.caption.weight(.semibold))
+
+                    Text(AcknowledgmentsSheet.lilAgentsLicense)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .cleanShotSurface(
+                            shape: RoundedRectangle(cornerRadius: 10, style: .continuous),
+                            level: .control
+                        )
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cleanShotSurface(
+                    shape: RoundedRectangle(cornerRadius: 16, style: .continuous),
+                    level: .control
+                )
+            }
+            .padding(20)
+        }
+        .frame(minWidth: 420, idealWidth: 520, minHeight: 540, idealHeight: 640)
+    }
+
+    static let lilAgentsLicense = """
+        MIT License
+
+        Copyright (c) 2026 Ryan Stephen
+
+        Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+        The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+        """
 }

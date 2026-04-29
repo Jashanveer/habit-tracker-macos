@@ -108,13 +108,19 @@ struct RungIntroView: View {
 
     private var content: some View {
         ZStack {
-            // Warm vignette backdrop matches the design's
-            // `radial-gradient(ellipse at center, #221f1a 0%, #14110e 70%)`.
+            // Warm vignette backdrop. Dark scheme matches the design's
+            // `radial-gradient(ellipse at center, #221f1a 0%, #14110e 70%)`;
+            // light scheme inverts to a warm cream → beige vignette.
             RadialGradient(
-                colors: [
-                    Color(red: 0x22/255, green: 0x1F/255, blue: 0x1A/255),
-                    Color.rungBg
-                ],
+                colors: colorScheme == .dark
+                    ? [
+                        Color(red: 0x22/255, green: 0x1F/255, blue: 0x1A/255),
+                        Color.rungBg
+                      ]
+                    : [
+                        Color(red: 0xFA/255, green: 0xF6/255, blue: 0xEC/255),
+                        Color(red: 0xE8/255, green: 0xDF/255, blue: 0xC8/255)
+                      ],
                 center: .center,
                 startRadius: 0,
                 endRadius: 800
@@ -217,8 +223,8 @@ struct RungIntroView: View {
 
         VStack(spacing: 18) {
             Text("Rung")
-                .font(.system(size: 84, weight: .semibold, design: .serif))
-                .foregroundStyle(Color.rungText)
+                .font(.system(size: 84, weight: .semibold, design: .rounded))
+                .foregroundStyle(colorScheme == .dark ? Color.rungText : Color.rungRail)
                 .kerning(-1.6)
                 .opacity(wordmarkOpacity)
                 .offset(y: wordmarkY)

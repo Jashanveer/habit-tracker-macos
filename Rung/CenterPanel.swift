@@ -133,7 +133,7 @@ struct CenterPanel: View {
 
     private func requestAIGreeting() {
         Task {
-            guard #available(macOS 26.0, *) else { return }
+            guard #available(macOS 26.0, iOS 26.0, *) else { return }
             do {
                 let session = LanguageModelSession()
                 let prompt = buildGreetingPrompt()
